@@ -1,17 +1,12 @@
 import torch
 import torch.nn as nn
 
-class RIMDAutoEncoder(nn.Module):
 
+class Encoder(nn.Module):
     def __init__(self, input_dim, hidden_dim, latent_dim):
+        super(Encoder, self).__init__()
 
-        super(RIMDAutoEncoder, self).__init__()
-
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.latent_dim = latent_dim
-
-        self.encoder = nn.Sequential(
+        self.model = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.BatchNorm1d(hidden_dim),
             nn.LeakyReLU(0.3),
@@ -19,20 +14,28 @@ class RIMDAutoEncoder(nn.Module):
             nn.BatchNorm1d(latent_dim),
             nn.LeakyReLU(0.3)
         )
-        self.decoder = nn.Sequential(
+
+
+    def forward(self, x):
+
+        return self.model(x)
+
+class Decoder(nn.Module):
+    def __init__(self, latent_dim, hidden_dim, output_dim):
+        super(Decoder, self).__init__()
+
+        self.model = self.decoder = nn.Sequential(
             nn.Linear(latent_dim, hidden_dim),
             nn.BatchNorm1d(hidden_dim),
             nn.LeakyReLU(0.3),
-            nn.Linear(hidden_dim, input_dim),
-            nn.BatchNorm1d(input_dim),
+            nn.Linear(hidden_dim, output_dim),
+            nn.BatchNorm1d(output_dim),
             nn.Tanh()
         )
 
     def forward(self, x):
-        encoded = self.encoder(x)
-        decoded = self.decoder(encoded)
 
-        return encoded, decoded
+        return self.model(x)
 
 class Discriminator(nn.Module):
 
@@ -62,10 +65,13 @@ class Discriminator(nn.Module):
 
 
 def test_AE():
-    AE = RIMDAutoEncoder(input_dim = 60012, hidden_dim = 300, latent_dim = 128)
+    encoder = Encoder(input_dim = 60012, hidden_dim = 300, latent_dim = 128)
+    decoder = Decoder(latent_dim = 128, hidden_dim = 300, output_dim = 60012)
+
     fake_data = torch.rand(32, 60012)
 
-    z, recon = AE(fake_data)
+    z = encoder(fake_data)
+    recon = decoder(z)
 
     print (z.size(), recon.size())
 
