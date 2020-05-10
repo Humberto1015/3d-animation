@@ -3,8 +3,11 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
+import time
 import sys
 sys.path.append('./src/')
+sys.path.append('./utils/')
+from visualizer import Visualizer
 from datasets import AnimalRIMD
 from models import Encoder, Decoder, Discriminator
 from torch.autograd import Variable
@@ -14,9 +17,8 @@ from torch.autograd import Variable
 class AbstractTrainer(object):
     def __init__(self, opt):
         super(AbstractTrainer, self).__init__()
-        self.start_time = time.time()
         self.opt = opt
-        self.start_visdom()
+        #self.start_visdom()
         self.reset_epoch()
 
     def start_visdom(self):
@@ -38,11 +40,15 @@ class AutoEncoderTrainer(AbstractTrainer):
     def __init__(self, opt):
         super().__init__(opt)
         self.opt = opt
+        self.start_visdom()
+
+    def start_visdom(self):
+        self.vis = Visualizer(env = 'AutoEncoder Training', port = 8888)
 
     def build_network(self):
         print ('- Build the network architecture')
-        self.encoder = Encoder()
-        self.decoder = Decoder()
+        self.encoder = Encoder(input_dim = self.feat_dim, hidden_dim = 512, latent_dim = 128)
+        self.decoder = Decoder(latent_dim = 128, hidden_dim = 512, output_dim = self.feat_dim)
 
         self.encoder.cuda()
         self.decoder.cuda()
@@ -54,7 +60,9 @@ class AutoEncoderTrainer(AbstractTrainer):
             lr = self.opt.learning_rate)
 
     def build_dataset_train(self):
-        train_data = AnimalRIMD(train = True)
+        train_data = AnimalRIMD(train = False)
+        self.feat_dim = train_data.__getitem__(0).shape[0]
+        print ('Input feature size = ', self.feat_dim)
         self.num_train_data = len(train_data)
         self.train_loader = torch.utils.data.DataLoader(train_data, batch_size = self.opt.batch_size, shuffle = True, num_workers = self.opt.workers)
 
@@ -77,7 +85,6 @@ class AutoEncoderTrainer(AbstractTrainer):
         self.encoder.train()
         self.decoder.train()
 
-
         self.optimizer.zero_grad()
 
         input_feat = self.data.cuda()
@@ -86,20 +93,22 @@ class AutoEncoderTrainer(AbstractTrainer):
 
         # loss
         self.loss_train_total = self.mseLoss(recon, input_feat)
+        self.loss.append(self.loss_train_total.item())
 
         self.loss_train_total.backward()
         self.optimizer.step()
         self.print_iteration_stats()
-
-
         self.increment_iteration()
 
     def train_epoch(self):
         self.reset_iteration()
+        self.loss = []
         for step, data in enumerate(self.train_loader):
             self.data = data
             self.train_iteration()
-        self.vis.draw_line(win = 'Loss', epoch = self.epoch, value = self.loss_train_total.item())
+        self.loss = torch.Tensor(self.loss)
+        self.loss = torch.mean(self.loss)
+        self.vis.draw_line(win = 'Loss', x = self.epoch, y = self.loss)
 
     def save_network(self):
         print("\nsaving net...")
