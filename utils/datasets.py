@@ -17,13 +17,13 @@ class AnimalRIMD(Dataset):
     def __getitem__(self, index):
 
 
-        data = np.load(self.path + str(index) + '.npy')
+        data = np.load(self.path + str(index) + '_norm.npy')
 
         # normalize to -0.9 ~ 0.9
-        for i in range(data.shape[0]):
-            min_value = self.minima[i].copy()
-            max_value = self.maxima[i].copy()
-            data[i] = 2 * self.a * ((data[i] - min_value) / (max_value - min_value)) - self.a
+        #for i in range(data.shape[0]):
+        #    min_value = self.minima[i].copy()
+        #    max_value = self.maxima[i].copy()
+        #    data[i] = 2 * self.a * ((data[i] - min_value) / (max_value - min_value)) - self.a
 
         data = data.astype(np.float32)
         return data
@@ -32,7 +32,7 @@ class AnimalRIMD(Dataset):
         if self.train:
             return 25000
         else:
-            return 5000
+            return 100
 
 def test_animal():
     dataset = AnimalRIMD(train = False)

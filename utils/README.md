@@ -3,7 +3,7 @@
 ## rimd2feature.py
 - parse RIMD data from .b files
 - preserve entries we want to form a feature vector for each shape
-- preprocess the feature vector (Not yet done.)
+- preprocess the feature vector
 
 ## datasets.py
 

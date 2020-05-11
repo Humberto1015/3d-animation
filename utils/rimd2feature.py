@@ -6,13 +6,13 @@ import argparse
 import struct
 import numpy as np
 
-class RIMDFeature:
+class FeatureTransformer:
     def __init__(self, src_dir, dst_dir):
         num_neighbors = self.get_num_neighbors_from_file(src_dir + 'header.b')
 
         # except for the header file
-        self.num_models = len(os.listdir(src_dir)) - 1
-        self.num_models = 5000
+        #self.num_models = len(os.listdir(src_dir)) - 1
+        self.num_models = 100
 
         for i in range(self.num_models):
             file_name = src_dir + str(i) + '.b'
@@ -20,7 +20,7 @@ class RIMDFeature:
             rimd_data = self.parse_content(num_neighbors, file_name)
             rimd_feat = self.rimd2feat(rimd_data)
             np.save(dst_dir + str(i), rimd_feat)
-            print ('Save %s' % dst_dir + str(i) + '.b\n')
+            print ('Save %s' % dst_dir + str(i) + '.npy\n')
 
             # update bounds
             if i == 0:
@@ -114,12 +114,26 @@ class RIMDFeature:
 
         return feat
 
+    def normalize(self, feat):
+        num_dim = feat.shape[0]
+        a = 0.9
+        for i in range(num_dim):
+            min_val = self.minima[i].copy()
+            max_val = self.maxima[i].copy()
+
+            feat[i] = 2 * a * ((feat[i] - min_val)/ (max_val - min_val)) -a
+        return feat
+
+
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--src_dir', type = str)
-    parser.add_argument('--dst_dir', type = str)
-    opt = parser.parse_args()
+
+    src_dir = './rimd-data/Animal_all/test/'
+    dst_dir = './rimd-feature/Animal_all/test/'
 
     # generate rimd feautre from rimd data
-    data = RIMDFeature(opt.src_dir, opt.dst_dir)
+    T = FeatureTransformer(src_dir, dst_dir)
     # normalize
+    for i in range(100):
+        feat = np.load(dst_dir + str(i) + '.npy')
+        feat_norm = T.normalize(feat)
+        np.save(dst_dir + str(i) + '_norm', feat_norm)
