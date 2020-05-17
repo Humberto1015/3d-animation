@@ -4,7 +4,7 @@ sys.path.append('./src/')
 
 from models import Encoder, Decoder
 from feature2rimd import RIMDTransformer
-from datasets import AnimalRIMD
+from datasets import AnimalRIMD, SmplRIMD
 
 import torch
 import struct
@@ -29,15 +29,15 @@ def write2file(file_name, rimd_data):
     fout.close()
 
 if __name__ == '__main__':
-    data = AnimalRIMD(train = False)
+    data = SmplRIMD()
     feat_dim = data.__getitem__(0).shape[0]
-    data_loader = torch.utils.data.DataLoader(data, batch_size = 32, shuffle = True, num_workers = 8)
+    data_loader = torch.utils.data.DataLoader(data, batch_size = 8, shuffle = False, num_workers = 8)
 
     encoder = Encoder(input_dim = feat_dim, hidden_dim = 512, latent_dim = 128)
     decoder = Decoder(latent_dim = 128, hidden_dim = 512, output_dim = feat_dim)
 
-    encoder.load_state_dict(torch.load('./trained_weights/AutoEncoder/Encoder.pth'))
-    decoder.load_state_dict(torch.load('./trained_weights/AutoEncoder/Decoder.pth'))
+    encoder.load_state_dict(torch.load('./trained_weights/AdversarialAutoEncoder/Encoder.pth'))
+    decoder.load_state_dict(torch.load('./trained_weights/AdversarialAutoEncoder/Decoder.pth'))
 
     encoder.cuda()
     decoder.cuda()
@@ -46,22 +46,28 @@ if __name__ == '__main__':
     decoder.eval()
 
 
-    header_path = './rimd-data/Animal_all/test/header.b'
-    minima_path = './rimd-feature/Animal_all/test/minima.npy'
-    maxima_path = './rimd-feature/Animal_all/test/maxima.npy'
-
+    header_path = './rimd-data/SMPL/header.b'
+    minima_path = './rimd-feature/SMPL/minima.npy'
+    maxima_path = './rimd-feature/SMPL/maxima.npy'
 
     transformer = RIMDTransformer(header_path, minima_path, maxima_path)
 
-
-    for step, data in enumerate(data_loader):
+    for _, data in enumerate(data_loader):
         z = encoder(data.cuda())
         recon = decoder(z)
-
-
         recon = recon.detach().cpu().numpy()
-        for i in range(recon.shape[0]):
+        for i in range(z.size(0)):
             rimd = transformer.turn2RIMD(recon[i])
             write2file(str(i) + '.b', rimd)
 
         break
+
+    # generate from N(0, I)
+    '''
+    batch_z = torch.randn(10, 128).cuda()
+    recon = decoder(batch_z)
+    recon = recon.detach().cpu().numpy()
+    for i in range(batch_z.size(0)):
+        rimd = transformer.turn2RIMD(recon[i])
+        write2file(str(i) + '.b', rimd)
+    '''

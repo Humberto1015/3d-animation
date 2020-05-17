@@ -12,7 +12,7 @@ class FeatureTransformer:
 
         # except for the header file
         #self.num_models = len(os.listdir(src_dir)) - 1
-        self.num_models = 100
+        self.num_models = 10000
 
         for i in range(self.num_models):
             file_name = src_dir + str(i) + '.b'
@@ -33,6 +33,11 @@ class FeatureTransformer:
                         self.maxima[j] = rimd_feat[j].copy()
                     if rimd_feat[j] < self.minima[j]:
                         self.minima[j] = rimd_feat[j].copy()
+
+                    if self.maxima[j] == self.minima[j]:
+                        print ('The max value equals the min value!')
+                        self.maxima[j] = self.maxima[j] + 1e-6
+                        self.minima[j] = self.minima[j] - 1e-6
 
         np.save(dst_dir + 'maxima', self.maxima)
         np.save(dst_dir + 'minima', self.minima)
@@ -127,13 +132,13 @@ class FeatureTransformer:
 
 if __name__ == '__main__':
 
-    src_dir = './rimd-data/Animal_all/test/'
-    dst_dir = './rimd-feature/Animal_all/test/'
+    src_dir = './rimd-data/SMPL/'
+    dst_dir = './rimd-feature/SMPL/'
 
     # generate rimd feautre from rimd data
     T = FeatureTransformer(src_dir, dst_dir)
     # normalize
-    for i in range(100):
+    for i in range(10000):
         feat = np.load(dst_dir + str(i) + '.npy')
         feat_norm = T.normalize(feat)
         np.save(dst_dir + str(i) + '_norm', feat_norm)
