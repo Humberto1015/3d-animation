@@ -1,24 +1,9 @@
-import struct
 import numpy as np
 import argparse
-
-def write2file(file_name, rimd_data):
-    fout = open(file_name, 'wb')
-
-    for i in range(len(rimd_data)):
-
-        one_ring = rimd_data[i]
-
-        # dRij
-        for j in range(len(one_ring) - 1):
-            for k in range(3):
-                for l in range(3):
-                    fout.write(struct.pack('<f', one_ring[j][k][l]))
-        # Si
-        for j in range(3):
-            for k in range(3):
-                fout.write(struct.pack('<f', one_ring[-1][j][k]))
-    fout.close()
+import struct
+import sys
+sys.path.append('tools/')
+import utils
 
 class RIMDTransformer:
     def __init__(self, header_path, minima_path, maxima_path):
@@ -122,24 +107,17 @@ class RIMDTransformer:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--header_path', type = str)
-    parser.add_argument('--minima_path', type = str)
-    parser.add_argument('--maxima_path', type = str)
+    parser.add_argument('--header_path', type = str, default = './rimd-data/SMPL/header.b')
+    parser.add_argument('--minima_path', type = str, default = './rimd-feature/SMPL/minima.npy')
+    parser.add_argument('--maxima_path', type = str, default = './rimd-feature/SMPL/maxima.npy')
     opt = parser.parse_args()
 
-    header_path = './rimd-data/Animal_all/test/header.b'
-    minima_path = './rimd-feature/Animal_all/test/minima.npy'
-    maxima_path = './rimd-feature/Animal_all/test/maxima.npy'
+    T = RIMDTransformer(opt.header_path, opt.minima_path, opt.maxima_path)
 
-    T = RIMDTransformer(header_path, minima_path, maxima_path)
-
-    feature_path = './rimd-feature/Animal_all/test/'
+    feature_path = './rimd-feature/SMPL/'
 
     for i in range(10):
         feat = np.load(feature_path + str(i) + '_norm.npy')
         rimd = T.turn2RIMD(feat)
 
-        #print (rimd)
-
-
-        write2file(str(i) + '.b', rimd)
+        utils.write2file(str(i) + '.b', rimd)

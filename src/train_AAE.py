@@ -3,12 +3,12 @@ import time
 from trainers import AdversarialAutoEncoderTrainer
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--batch_size', type = int, default = 64)
+parser.add_argument('--batch_size', type = int, default = 128)
 parser.add_argument('--learning_rate', type = float, default = 0.001)
-parser.add_argument('--epochs', type = int, default = 600)
+parser.add_argument('--epochs', type = int, default = 1000)
 parser.add_argument('--workers', type = int, default = 8)
-parser.add_argument('--beta1', type = float, default = 0.5)
-parser.add_argument('--beta2', type = float, default = 0.9)
+parser.add_argument('--beta1', type = float, default = 0.9)
+parser.add_argument('--beta2', type = float, default = 0.999)
 parser.add_argument('--save_path', type = str, default = './trained_weights/AdversarialAutoEncoder/')
 opt = parser.parse_args()
 

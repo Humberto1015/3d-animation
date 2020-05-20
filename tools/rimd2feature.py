@@ -132,11 +132,16 @@ class FeatureTransformer:
 
 if __name__ == '__main__':
 
-    src_dir = './rimd-data/SMPL/'
-    dst_dir = './rimd-feature/SMPL/'
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--src_dir', type = str, default= './rimd-data/SMPL/')
+    parser.add_argument('--dst_dir', type = str, default = './rimd-feature/SMPL/')
+    opt = parser.parse_args()
 
-    # generate rimd feautre from rimd data
-    T = FeatureTransformer(src_dir, dst_dir)
+    print ('[info] RIMD location: %s' % opt.src_dir)
+    print ('[info] Target location: %s' % opt.dst_dir)
+
+    T = FeatureTransformer(opt.src_dir, opt.dst_dir)
+
     # normalize
     for i in range(10000):
         feat = np.load(dst_dir + str(i) + '.npy')

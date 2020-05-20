@@ -6,13 +6,12 @@ import numpy as np
 import time
 import sys
 sys.path.append('./src/')
-sys.path.append('./utils/')
-from visualizer import Visualizer
-from datasets import AnimalRIMD, SmplRIMD
+sys.path.append('./tools/')
+import utils
+from datasets import SmplRIMD
 from models import Encoder, Decoder, Discriminator
 from torch.autograd import Variable
 
-# basic trainer
 class AbstractTrainer(object):
     def __init__(self, opt):
         super(AbstractTrainer, self).__init__()
@@ -42,7 +41,7 @@ class AutoEncoderTrainer(AbstractTrainer):
         self.start_visdom()
 
     def start_visdom(self):
-        self.vis = Visualizer(env = 'AutoEncoder Training', port = 8888)
+        self.vis = utils.Visualizer(env = 'AutoEncoder Training', port = 8888)
 
     def build_network(self):
         print ('- Build the network architecture')
@@ -59,7 +58,7 @@ class AutoEncoderTrainer(AbstractTrainer):
             lr = self.opt.learning_rate)
 
     def build_dataset_train(self):
-        train_data = AnimalRIMD(train = False)
+        train_data = SmplRIMD()
         self.feat_dim = train_data.__getitem__(0).shape[0]
         print ('Input feature size = ', self.feat_dim)
         self.num_train_data = len(train_data)
@@ -122,7 +121,7 @@ class AdversarialAutoEncoderTrainer(AbstractTrainer):
         self.start_visdom()
 
     def start_visdom(self):
-        self.vis = Visualizer(env = 'Adversarial AutoEncoder Training', port = 8888)
+        self.vis = utils.Visualizer(env = 'Adversarial AutoEncoder Training', port = 8888)
 
     def build_network(self):
         print ('- Build the network architecture')

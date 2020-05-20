@@ -3,9 +3,9 @@ import time
 from trainers import AutoEncoderTrainer
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--batch_size', type = int, default = 16)
+parser.add_argument('--batch_size', type = int, default = 128)
 parser.add_argument('--learning_rate', type = float, default = 0.001)
-parser.add_argument('--epochs', type = int, default = 100)
+parser.add_argument('--epochs', type = int, default = 600)
 parser.add_argument('--workers', type = int, default = 8)
 parser.add_argument('--save_path', type = str, default = './trained_weights/AutoEncoder/')
 opt = parser.parse_args()
