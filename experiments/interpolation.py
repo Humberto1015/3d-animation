@@ -15,11 +15,11 @@ from datasets import SmplRIMD
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--encoder_weights', type = str, default = './trained_weights/AdversarialAutoEncoder/Encoder.pth')
-    parser.add_argument('--decoder_weights', type = str, default = './trained_weights/AdversarialAutoEncoder/Decoder.pth')
+    parser.add_argument('--encoder_weights', type = str, default = './trained_weights/AutoEncoder/Encoder.pth')
+    parser.add_argument('--decoder_weights', type = str, default = './trained_weights/AutoEncoder/Decoder.pth')
     parser.add_argument('--m0', type = str, help = 'The index of the first model')
     parser.add_argument('--m1', type = str, help = 'The index of the second model')
-    parser.add_argument('--num_in_betweens', type = int, help = 'number of frames between the source and target model',default = 3)
+    parser.add_argument('--num_in_betweens', type = int, help = 'number of frames between the source and target model', default = 9)
     parser.add_argument('--header_path', type = str, default = './rimd-data/SMPL/header.b')
     parser.add_argument('--minima_path', type = str, default = './rimd-feature/SMPL/minima.npy')
     parser.add_argument('--maxima_path', type = str, default = './rimd-feature/SMPL/maxima.npy')
@@ -34,8 +34,10 @@ if __name__ == '__main__':
 
     encoder.load_state_dict(torch.load(opt.encoder_weights))
     decoder.load_state_dict(torch.load(opt.decoder_weights))
-    encoder.cuda().eval()
-    decoder.cuda().eval()
+    #encoder.cuda().eval()
+    #decoder.cuda().eval()
+    encoder.eval()
+    decoder.eval()
 
     # setup the transformer (feature -> rimd data)
     transformer = RIMDTransformer(opt.header_path, opt.minima_path, opt.maxima_path)
@@ -44,12 +46,11 @@ if __name__ == '__main__':
     feat_0 = np.load('./rimd-feature/SMPL/' + str(opt.m0) + '_norm.npy')
     feat_1 = np.load('./rimd-feature/SMPL/' + str(opt.m1) + '_norm.npy')
 
-    feat_0 = (torch.from_numpy(feat_0.astype(np.float32)).cuda()).unsqueeze(0)
-    feat_1 = (torch.from_numpy(feat_1.astype(np.float32)).cuda()).unsqueeze(0)
+    #feat_0 = (torch.from_numpy(feat_0.astype(np.float32)).cuda()).unsqueeze(0)
+    #feat_1 = (torch.from_numpy(feat_1.astype(np.float32)).cuda()).unsqueeze(0)
+    feat_0 = (torch.from_numpy(feat_0.astype(np.float32))).unsqueeze(0)
+    feat_1 = (torch.from_numpy(feat_1.astype(np.float32))).unsqueeze(0)
 
-
-    feat_0.expand(64, feat_0.size(1))
-    feat_1.expand(64, feat_1.size(1))
 
     z_0 = encoder(feat_0)
     z_1 = encoder(feat_1)

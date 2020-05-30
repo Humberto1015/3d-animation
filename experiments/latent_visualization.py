@@ -4,8 +4,9 @@ sys.path.append('./src/')
 
 from models import Encoder, Decoder
 from feature2rimd import RIMDTransformer
-from datasets import AnimalRIMD, SmplRIMD
+from datasets import SmplRIMD
 from sklearn.manifold import TSNE
+from sklearn.decomposition import PCA
 
 import torch
 import struct
@@ -22,8 +23,8 @@ if __name__ == '__main__':
     data_loader = torch.utils.data.DataLoader(data, batch_size = 128, shuffle = False)
     encoder = Encoder(input_dim = feat_dim, hidden_dim = 512, latent_dim = 128)
     decoder = Decoder(latent_dim = 128, hidden_dim = 512, output_dim = feat_dim)
-    encoder.load_state_dict(torch.load('./trained_weights/AdversarialAutoEncoder/Encoder.pth'))
-    decoder.load_state_dict(torch.load('./trained_weights/AdversarialAutoEncoder/Decoder.pth'))
+    encoder.load_state_dict(torch.load('./trained_weights/AutoEncoder/Encoder.pth'))
+    decoder.load_state_dict(torch.load('./trained_weights/AutoEncoder/Decoder.pth'))
     encoder.cuda().eval()
     decoder.cuda().eval()
 
@@ -34,11 +35,22 @@ if __name__ == '__main__':
         for v in z:
             z_vectors.append(v)
 
-        if step == 50:
-            break
     z_vectors = np.array(z_vectors)
-    # t-sne
-    embedded = TSNE(n_components = 2).fit_transform(z_vectors)
+    pca = PCA(n_components = 2)
+    pca.fit(z_vectors)
 
+
+    embedded = pca.transform(z_vectors)
     vis = utils.Visualizer(env = 'Latent Space Visualization', port = 8888)
     vis.draw_2d_points(win = 'Latent', verts = embedded, color = np.array([[255, 0, 0]]))
+
+    s = z_vectors[0]
+    t = z_vectors[9999]
+    interpolations = []
+    num_in_betweens = 9
+    diff = (t - s) / (num_in_betweens + 1)
+    for i in range(num_in_betweens + 2):
+        interpolations.append(s + diff * i)
+
+    embedded = pca.transform(interpolations)
+    vis.draw_2d_points(win = 'Latent', verts = embedded, color = np.array([[0, 0, 255]]))

@@ -58,11 +58,16 @@ class AutoEncoderTrainer(AbstractTrainer):
             lr = self.opt.learning_rate)
 
     def build_dataset_train(self):
-        train_data = SmplRIMD()
+        train_data = SmplRIMD(mode = 'train')
         self.feat_dim = train_data.__getitem__(0).shape[0]
         print ('Input feature size = ', self.feat_dim)
         self.num_train_data = len(train_data)
-        self.train_loader = torch.utils.data.DataLoader(train_data, batch_size = self.opt.batch_size, shuffle = True, num_workers = self.opt.workers)
+        self.train_loader = torch.utils.data.DataLoader(train_data, batch_size = self.opt.batch_size, shuffle = True)
+
+    def build_dataset_valid(self):
+        valid_data = SmplRIMD(mode = 'valid')
+        self.valid_loader = torch.utils.data.DataLoader(valid_data, batch_size = 128, shuffle = True)
+
 
     def build_losses(self):
         print ('- Build the loss functions')
@@ -86,6 +91,7 @@ class AutoEncoderTrainer(AbstractTrainer):
         self.optimizer.zero_grad()
 
         input_feat = self.data.cuda()
+
         z = self.encoder(input_feat)
         recon = self.decoder(z)
 
@@ -98,6 +104,24 @@ class AutoEncoderTrainer(AbstractTrainer):
         self.print_iteration_stats()
         self.increment_iteration()
 
+    def valid_iteration(self):
+
+        self.encoder.eval()
+        self.decoder.eval()
+
+        input_feat = self.data.cuda()
+
+        z = self.encoder(input_feat)
+        recon = self.decoder(z)
+
+        # loss
+        self.loss_train_total = self.mseLoss(recon, input_feat)
+        self.loss.append(self.loss_train_total.item())
+
+        self.loss_train_total.backward()
+        self.increment_iteration()
+
+
     def train_epoch(self):
 
         self.reset_iteration()
@@ -107,7 +131,18 @@ class AutoEncoderTrainer(AbstractTrainer):
             self.train_iteration()
         self.loss = torch.Tensor(self.loss)
         self.loss = torch.mean(self.loss)
-        self.vis.draw_line(win = 'Loss', x = self.epoch, y = self.loss)
+        self.vis.draw_line(win = 'Train Loss', x = self.epoch, y = self.loss)
+
+    def valid_epoch(self):
+        self.reset_iteration()
+        self.loss = []
+        for step, data in enumerate(self.valid_loader):
+            self.data = data
+            self.valid_iteration()
+
+        self.loss = torch.Tensor(self.loss)
+        self.loss = torch.mean(self.loss)
+        self.vis.draw_line(win = 'Valid Loss', x = self.epoch, y = self.loss)
 
     def save_network(self):
         print("\nsaving net...")
@@ -129,6 +164,14 @@ class AdversarialAutoEncoderTrainer(AbstractTrainer):
         self.decoder = Decoder(latent_dim = 128, hidden_dim = 512, output_dim = self.feat_dim)
         self.discriminator = Discriminator()
 
+        encoder_weights = self.opt.save_path + 'Encoder.pth'
+        decoder_weights = self.opt.save_path + 'Decoder.pth'
+        discriminator_weights = self.opt.save_path + 'Discriminator.pth'
+
+        self.encoder.load_state_dict(torch.load(encoder_weights))
+        self.decoder.load_state_dict(torch.load(decoder_weights))
+        self.discriminator.load_state_dict(torch.load(discriminator_weights))
+
         self.encoder.cuda()
         self.decoder.cuda()
         self.discriminator.cuda()
@@ -145,6 +188,14 @@ class AdversarialAutoEncoderTrainer(AbstractTrainer):
         self.num_train_data = len(train_data)
         print ('Number of training samples = ', self.num_train_data)
         self.train_loader = torch.utils.data.DataLoader(train_data, batch_size = self.opt.batch_size, shuffle = True, num_workers = self.opt.workers)
+
+    def build_dataset_valid(self):
+        valid_data = SmplRIMD()
+        self.feat_dim = valid_data.__getitem__(0).shape[0]
+        self.num_valid_data = len(valid_data)
+        print ('Number of valid samples = ', self.num_valid_data)
+        self.valid_loader = torch.utils.data.DataLoader(valid_data, batch_size = 16, shuffle = True, num_workers = self.opt.workers)
+
 
     def build_losses(self):
         print ('- Build the loss functions')
@@ -212,6 +263,22 @@ class AdversarialAutoEncoderTrainer(AbstractTrainer):
         self.print_iteration_stats()
         self.increment_iteration()
 
+    def valid_iteration(self):
+        self.encoder.eval()
+        self.decoder.eval()
+        self.discriminator.eval()
+
+        batch_size = self.data.size(0)
+
+        x = self.data.cuda()
+        z = self.encoder(x)
+        rec = self.decoder(z)
+
+        self.loss_dec = self.recLoss(rec, x)
+        self.dec_losses.append(self.loss_dec.item())
+
+        self.increment_iteration()
+
     def train_epoch(self):
         self.reset_iteration()
 
@@ -235,6 +302,20 @@ class AdversarialAutoEncoderTrainer(AbstractTrainer):
         self.vis.draw_line(win = 'Encoder Loss', x = self.epoch, y = loss_enc)
         self.vis.draw_line(win = 'Decoder Loss', x = self.epoch, y = loss_dec)
         self.vis.draw_line(win = 'Discriminator Loss', x = self.epoch, y = loss_dis)
+
+    def valid_epoch(self):
+        self.reset_iteration()
+
+        self.dec_losses = []
+
+        for step, data in enumerate(self.valid_loader):
+            self.data = data
+            self.valid_iteration()
+
+        loss_dec = torch.Tensor(self.dec_losses)
+        loss_dec = torch.mean(loss_dec)
+
+        self.vis.draw_line(win = 'Decoder Loss (Validation process)', x = self.epoch, y = loss_dec)
 
     def save_network(self):
         print("\nsaving net...")

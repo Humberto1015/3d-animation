@@ -121,7 +121,7 @@ class FeatureTransformer:
 
     def normalize(self, feat):
         num_dim = feat.shape[0]
-        a = 0.9
+        a = 0.95
         for i in range(num_dim):
             min_val = self.minima[i].copy()
             max_val = self.maxima[i].copy()
@@ -144,6 +144,6 @@ if __name__ == '__main__':
 
     # normalize
     for i in range(10000):
-        feat = np.load(dst_dir + str(i) + '.npy')
+        feat = np.load(opt.dst_dir + str(i) + '.npy')
         feat_norm = T.normalize(feat)
-        np.save(dst_dir + str(i) + '_norm', feat_norm)
+        np.save(opt.dst_dir + str(i) + '_norm', feat_norm)

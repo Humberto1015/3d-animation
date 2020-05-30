@@ -31,6 +31,7 @@ class Visualizer:
         self._vis.scatter(
             X = verts,
             win = win,
+            update = 'append',
             opts = {
                 'markersize': 5,
                 'markercolor': color,

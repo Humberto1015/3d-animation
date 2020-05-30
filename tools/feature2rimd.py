@@ -46,21 +46,21 @@ class RIMDTransformer:
                 # theta_x
                 min_val = self.minima[feat_index]
                 max_val = self.maxima[feat_index]
-                theta_x = self.backMapping(feat[feat_index], min_val, max_val, a=0.9)
+                theta_x = self.backMapping(feat[feat_index], min_val, max_val, a=0.95)
                 logdRij[1][2] = -theta_x
                 logdRij[2][1] = theta_x
                 feat_index += 1
                 # theta_y
                 min_val = self.minima[feat_index]
                 max_val = self.maxima[feat_index]
-                theta_y = self.backMapping(feat[feat_index], min_val, max_val, a=0.9)
+                theta_y = self.backMapping(feat[feat_index], min_val, max_val, a=0.95)
                 logdRij[0][2] = theta_y
                 logdRij[2][0] = -theta_y
                 feat_index += 1
                 # theta_z
                 min_val = self.minima[feat_index]
                 max_val = self.maxima[feat_index]
-                theta_z = self.backMapping(feat[feat_index], min_val, max_val, a=0.9)
+                theta_z = self.backMapping(feat[feat_index], min_val, max_val, a=0.95)
                 logdRij[0][1] = -theta_z
                 logdRij[1][0] = theta_z
                 feat_index += 1
@@ -70,30 +70,30 @@ class RIMDTransformer:
             Si = np.zeros((3, 3))
             min_val = self.minima[feat_index]
             max_val = self.maxima[feat_index]
-            Si[0][0] = self.backMapping(feat[feat_index], min_val, max_val, a=0.9)
+            Si[0][0] = self.backMapping(feat[feat_index], min_val, max_val, a=0.95)
             feat_index += 1
             min_val = self.minima[feat_index]
             max_val = self.maxima[feat_index]
-            Si[0][1] = self.backMapping(feat[feat_index], min_val, max_val, a=0.9)
-            Si[1][0] = self.backMapping(feat[feat_index], min_val, max_val, a=0.9)
+            Si[0][1] = self.backMapping(feat[feat_index], min_val, max_val, a=0.95)
+            Si[1][0] = self.backMapping(feat[feat_index], min_val, max_val, a=0.95)
             feat_index += 1
             min_val = self.minima[feat_index]
             max_val = self.maxima[feat_index]
-            Si[0][2] = self.backMapping(feat[feat_index], min_val, max_val, a=0.9)
-            Si[2][0] = self.backMapping(feat[feat_index], min_val, max_val, a=0.9)
+            Si[0][2] = self.backMapping(feat[feat_index], min_val, max_val, a=0.95)
+            Si[2][0] = self.backMapping(feat[feat_index], min_val, max_val, a=0.95)
             feat_index += 1
             min_val = self.minima[feat_index]
             max_val = self.maxima[feat_index]
-            Si[1][1] = self.backMapping(feat[feat_index], min_val, max_val, a=0.9)
+            Si[1][1] = self.backMapping(feat[feat_index], min_val, max_val, a=0.95)
             feat_index += 1
             min_val = self.minima[feat_index]
             max_val = self.maxima[feat_index]
-            Si[1][2] = self.backMapping(feat[feat_index], min_val, max_val, a=0.9)
-            Si[2][1] = self.backMapping(feat[feat_index], min_val, max_val, a=0.9)
+            Si[1][2] = self.backMapping(feat[feat_index], min_val, max_val, a=0.95)
+            Si[2][1] = self.backMapping(feat[feat_index], min_val, max_val, a=0.95)
             feat_index += 1
             min_val = self.minima[feat_index]
             max_val = self.maxima[feat_index]
-            Si[2][2] = self.backMapping(feat[feat_index], min_val, max_val, a=0.9)
+            Si[2][2] = self.backMapping(feat[feat_index], min_val, max_val, a=0.95)
             feat_index += 1
 
             rimd[one_ring_index].append(Si)
@@ -102,7 +102,7 @@ class RIMDTransformer:
 
         return rimd
 
-    def backMapping(self, val, min_val, max_val, a = 0.9):
+    def backMapping(self, val, min_val, max_val, a = 0.95):
         return ((val + a) / (2.0 * a)) * (max_val - min_val) + min_val
 
 if __name__ == '__main__':

@@ -1,19 +1,31 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
 
 class Encoder(nn.Module):
     def __init__(self, input_dim, hidden_dim, latent_dim):
         super(Encoder, self).__init__()
 
+
         self.model = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.BatchNorm1d(hidden_dim),
             nn.LeakyReLU(0.3),
+            #nn.Dropout(0.5),
             nn.Linear(hidden_dim, latent_dim),
             nn.BatchNorm1d(latent_dim),
             nn.LeakyReLU(0.3)
         )
 
+    # encode only one sample
+    def encode(self, x):
+
+        x = x.unsqueeze(0)
+        x = self.model(x)
+        x = x.squeeze(0)
+
+        return x
 
     def forward(self, x):
 
@@ -27,10 +39,20 @@ class Decoder(nn.Module):
             nn.Linear(latent_dim, hidden_dim),
             nn.BatchNorm1d(hidden_dim),
             nn.LeakyReLU(0.3),
+            #nn.Dropout(0.5),
             nn.Linear(hidden_dim, output_dim),
             nn.BatchNorm1d(output_dim),
             nn.Tanh()
         )
+
+    # decode only one sample
+    def decode(self, z):
+
+        z = z.unsqueeze(0)
+        z = self.model(z)
+        z = z.squeeze(0)
+
+        return z
 
     def forward(self, x):
 
