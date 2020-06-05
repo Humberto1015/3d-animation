@@ -7,11 +7,11 @@ import torch
 import torch.autograd
 from torch.autograd.functional import jacobian
 import numpy as np
-from models import Encoder, Decoder
-from feature2rimd import RIMDTransformer
+from models import Encoder2, Decoder2
 from datasets import SmplRIMD
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
 class GeodesicSolver():
 
@@ -27,14 +27,14 @@ class GeodesicSolver():
 
     def init_path(self, s, t):
 
-        print ('Initializing the geodesic path...')
+        print ('[info] Initializing the geodesic path...')
         ''' start point '''
-        s = np.load('./rimd-feature/SMPL/' + str(s) + '_norm.npy').astype(np.float32)
+        s = np.load('./ACAP-data/SMPL/' + str(s) + '_norm.npy').astype(np.float32)
         s = torch.from_numpy(s).cuda()
         z_s = self.encoder.encode(s)
 
         ''' end point '''
-        t = np.load('./rimd-feature/SMPL/' + str(t) + '_norm.npy').astype(np.float32)
+        t = np.load('./ACAP-data/SMPL/' + str(t) + '_norm.npy').astype(np.float32)
         t = torch.from_numpy(t).cuda()
         z_t = self.encoder.encode(t)
 
@@ -57,6 +57,7 @@ class GeodesicSolver():
         Z = self.Z.cuda()
         for i in range(1, len(Z) - 1):
             J_h = jacobian(self.encoder.encode, self.decoder.decode(Z[i]))
+            print (J_h.size())
 
             term_A = self.decoder.decode(Z[i + 1])
             term_B = self.decoder.decode(Z[i])
@@ -81,8 +82,6 @@ class GeodesicSolver():
         del Z
         torch.cuda.empty_cache()
 
-        print ('Loss = ', self.loss)
-
     def update(self):
 
         alpha = 0.01
@@ -91,28 +90,30 @@ class GeodesicSolver():
 
     def solve(self):
         # use gradient descent to solve for optimal latent vectors
-        print ('Start to optimize!')
+        print ('[info] Start to optimize!')
         iter = 1
         while self.loss > 0.1:
-            print ('[Iteration %d]' % iter)
+
             self.get_loss()
             self.update()
+            print ('-[Iteration %d] loss = %f' % (iter, self.loss.item()))
             iter = iter + 1
-        print ('Done.')
 
         return self.Z.numpy()
 
 def linear_interpolation(opt, encoder, decoder):
 
+    print ('[info] Processing linear interpolation...')
+
     encoder = encoder.cuda()
     decoder = decoder.cuda()
 
-    s = np.load('./rimd-feature/SMPL/' + str(opt.s) + '_norm.npy').astype(np.float32)
+    s = np.load('./ACAP-data/SMPL/' + str(opt.s) + '_norm.npy').astype(np.float32)
     s = torch.from_numpy(s).cuda()
     z_s = encoder.encode(s)
 
     ''' end point '''
-    t = np.load('./rimd-feature/SMPL/' + str(opt.t) + '_norm.npy').astype(np.float32)
+    t = np.load('./ACAP-data/SMPL/' + str(opt.t) + '_norm.npy').astype(np.float32)
     t = torch.from_numpy(t).cuda()
     z_t = encoder.encode(t)
 
@@ -124,9 +125,13 @@ def linear_interpolation(opt, encoder, decoder):
     Z = torch.cat(Z, 0)
     Z = Z.detach().cpu()
 
+    print ('[info] Done.')
+
     return Z.numpy()
 
 def geodesic_interpolation(opt, encoder, decoder):
+
+    print ('[info] Processing geodesic interpolation')
 
     solver = GeodesicSolver(opt)
     solver.load_networks(encoder, decoder)
@@ -138,19 +143,42 @@ def visualize_path(embedded, seq_linear, seq_geodesic):
     pca = PCA(n_components = 2)
     pca.fit(embedded)
 
+    # visualize
+    #fig = plt.figure()
+    #ax = Axes3D(fig)
+
     embedded_2d = pca.transform(embedded)
-    xs, ys = embedded_2d.T
+    xs, ys= embedded_2d.T
     plt.scatter(xs, ys, c = 'r')
 
     seq_linear_2d = pca.transform(seq_linear)
     xs, ys = seq_linear_2d.T
     plt.scatter(xs, ys, c = 'b')
 
+    # draw edges
+    for i in range(xs.shape[0] - 1):
+        plt.plot([xs[i], xs[i + 1]], [ys[i], ys[i + 1]], c = 'b')
+
     seq_geodesic_2d = pca.transform(seq_geodesic)
     xs, ys = seq_geodesic_2d.T
     plt.scatter(xs, ys, c = 'g')
+    # draw edges
+    for i in range(xs.shape[0] - 1):
+        plt.plot([xs[i], xs[i + 1]], [ys[i], ys[i + 1]], c = 'g')
 
     plt.show()
+
+def debug():
+    pass
+
+def back_mapping(feat, minima, maxima):
+    a = 0.95
+    for i in range(feat.shape[0]):
+        min_val = minima[i].copy()
+        max_val = maxima[i].copy()
+        feat[i] = ((feat[i] + a) / (2.0 * a)) * (max_val - min_val) + min_val
+
+    return feat
 
 if __name__ == '__main__':
 
@@ -160,47 +188,67 @@ if __name__ == '__main__':
     parser.add_argument('--s', type = str, help = 'The index of the first model')
     parser.add_argument('--t', type = str, help = 'The index of the second model')
     parser.add_argument('--in_betweens', type = int, help = 'number of frames between the source and target model', default = 9)
-    parser.add_argument('--header_path', type = str, default = './rimd-data/SMPL/header.b')
-    parser.add_argument('--minima_path', type = str, default = './rimd-feature/SMPL/minima.npy')
-    parser.add_argument('--maxima_path', type = str, default = './rimd-feature/SMPL/maxima.npy')
-    parser.add_argument('--target_path', type = str, default = './rimd-sequence/')
+    parser.add_argument('--minima_path', type = str, default = './ACAP-data/SMPL/minima.npy')
+    parser.add_argument('--maxima_path', type = str, default = './ACAP-data/SMPL/maxima.npy')
+    parser.add_argument('--target_path', type = str, default = './ACAP-sequence/')
+    parser.add_argument('--mode', type = str)
     opt = parser.parse_args()
 
     ''' Load networks '''
-    print ('Loading networks...')
     data = SmplRIMD()
     data_loader = torch.utils.data.DataLoader(data, batch_size = 128, shuffle = False)
     feat_dim = data.__getitem__(0).shape[0]
-    encoder = Encoder(input_dim = feat_dim, hidden_dim = 512, latent_dim = 128)
-    decoder = Decoder(latent_dim = 128, hidden_dim = 512, output_dim = feat_dim)
+    encoder = Encoder2()
+    decoder = Decoder2()
+
     encoder.load_state_dict(torch.load(opt.encoder_weights))
     decoder.load_state_dict(torch.load(opt.decoder_weights))
     encoder.eval()
     decoder.eval()
 
-    seq_linear = linear_interpolation(opt, encoder, decoder)
-    seq_geodesic = geodesic_interpolation(opt, encoder, decoder)
+    if opt.mode == 'visualize':
+        seq_linear = linear_interpolation(opt, encoder, decoder)
+        #seq_geodesic = geodesic_interpolation(opt, encoder, decoder)
 
 
-    embedded = []
-    encoder = encoder.cpu()
-    decoder = decoder.cpu()
-    for step, data in enumerate(data_loader):
-        z = encoder(data)
-        z = z.detach().numpy()
-        for v in z:
-            embedded.append(v)
+        embedded = []
+        encoder = encoder.cpu()
+        decoder = decoder.cpu()
+        for step, data in enumerate(data_loader):
+            z = encoder(data)
+            z = z.detach().numpy()
+            for v in z:
+                embedded.append(v)
 
-    visualize_path(embedded, seq_linear, seq_geodesic)
+            if (step == 20):
+                break
 
-    '''
-    # output binary file
-    transformer = RIMDTransformer(opt.header_path, opt.minima_path, opt.maxima_path)
+        visualize_path(embedded, seq_linear, seq_linear)
 
-    recons = geoSolver.decoder(latent_vectors.cuda())
-    for i in range(recons.size(0)):
-        rimd = transformer.turn2RIMD((recons[i].detach().cpu().numpy()))
-        file_name = opt.target_path + str(i) + '.b'
-        utils.write2file(file_name, rimd)
-        print ('Saved to %s' % file_name)
-    '''
+
+    if opt.mode == 'debug':
+        x = torch.rand(6890, 9)
+        x = encoder.encode(x)
+        x = decoder.decode(x)
+        print (x.size())
+
+    if opt.mode == 'output_linear':
+        seq_linear = linear_interpolation(opt, encoder, decoder)
+        minima = np.load(opt.minima_path)
+        maxima = np.load(opt.maxima_path)
+        recons = decoder(torch.from_numpy(seq_linear).cuda())
+        for i in range(recons.size(0)):
+            feat = back_mapping((recons[i].detach().cpu().numpy()).flatten(), minima, maxima)
+            file_name = opt.target_path + str(i) + '.npy'
+            np.save(file_name, feat)
+            print ('[info] Saved to %s' % file_name)
+
+    if opt.mode == 'output_geodesic':
+        seq_geodesic = geodesic_interpolation(opt, encoder, decoder)
+        converter = utils.Converter(opt)
+        recons = decoder(torch.from_numpy(seq_geodesic).cuda())
+        for i in range(recons.size(0)):
+            rimd = converter.feat2RIMD((recons[i].detach().cpu().numpy()))
+            file_name = opt.target_path + str(i) + '.b'
+            converter.rimd2file(file_name, rimd)
+            print ('[info] Saved to %s' % file_name)
