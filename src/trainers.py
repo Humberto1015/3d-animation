@@ -8,8 +8,9 @@ import sys
 sys.path.append('./src/')
 sys.path.append('./tools/')
 import utils
-from datasets import SmplRIMD
-from models import Encoder2, Decoder2, Discriminator
+import itertools
+from datasets import ACAPData
+from models import Encoder, Decoder, Discriminator, Encoder2, Decoder2, Discriminator2
 from torch.autograd import Variable
 
 class AbstractTrainer(object):
@@ -45,8 +46,8 @@ class AutoEncoderTrainer(AbstractTrainer):
 
     def build_network(self):
         print ('[info] Build the network architecture')
-        self.encoder = Encoder2()
-        self.decoder = Decoder2()
+        self.encoder = Encoder()
+        self.decoder = Decoder()
 
         self.encoder.cuda()
         self.decoder.cuda()
@@ -58,13 +59,13 @@ class AutoEncoderTrainer(AbstractTrainer):
             lr = self.opt.learning_rate)
 
     def build_dataset_train(self):
-        train_data = SmplRIMD(mode = 'train')
+        train_data = ACAPData(mode = 'train', name = 'SMPL')
         self.num_train_data = len(train_data)
         print ('[info] Number of training samples = ', self.num_train_data)
         self.train_loader = torch.utils.data.DataLoader(train_data, batch_size = self.opt.batch_size, shuffle = True)
 
     def build_dataset_valid(self):
-        valid_data = SmplRIMD(mode = 'valid')
+        valid_data = ACAPData(mode = 'valid', name = 'SMPL')
         self.valid_loader = torch.utils.data.DataLoader(valid_data, batch_size = 128, shuffle = True)
 
     def build_losses(self):
@@ -146,132 +147,7 @@ class AutoEncoderTrainer(AbstractTrainer):
         torch.save(self.encoder.state_dict(), f"{self.opt.save_path}/Encoder.pth")
         torch.save(self.decoder.state_dict(), f"{self.opt.save_path}/Decoder.pth")
 
-class DAETrainer(AbstractTrainer):
-    def __init__(self, opt):
-        super().__init__(opt)
-        self.opt = opt
-        self.start_visdom()
-
-    def start_visdom(self):
-        self.vis = utils.Visualizer(env = 'Denoising AutoEncoder Training', port = 8888)
-
-    def build_network(self):
-        print ('- Build the network architecture')
-        self.encoder = Encoder(input_dim = self.feat_dim, hidden_dim = 512, latent_dim = 128)
-        self.decoder = Decoder(latent_dim = 128, hidden_dim = 512, output_dim = self.feat_dim)
-
-        self.encoder.cuda()
-        self.decoder.cuda()
-
-    def build_optimizer(self):
-        print ('- Build the optimizer')
-        self.optimizer = optim.Adam(
-            list(self.encoder.parameters()) + list(self.decoder.parameters()),
-            lr = self.opt.learning_rate)
-
-    def build_dataset_train(self):
-        train_data = SmplRIMD(mode = 'train')
-        self.feat_dim = train_data.__getitem__(0).shape[0]
-        print ('Input feature size = ', self.feat_dim)
-        self.num_train_data = len(train_data)
-        self.train_loader = torch.utils.data.DataLoader(train_data, batch_size = self.opt.batch_size, shuffle = True)
-
-    def build_dataset_valid(self):
-        valid_data = SmplRIMD(mode = 'valid')
-        self.valid_loader = torch.utils.data.DataLoader(valid_data, batch_size = 128, shuffle = True)
-
-    def build_losses(self):
-        print ('- Build the loss functions')
-        self.mseLoss = torch.nn.MSELoss()
-
-    def print_iteration_stats(self):
-        """
-        print stats at each iteration
-        """
-        print ('\r[Epoch %d] [Iteration %d/%d] Loss = %f' % (
-            self.epoch,
-            self.iteration,
-            int(self.num_train_data/self.opt.batch_size),
-            self.loss_train_total.item()), end = '')
-
-    def train_iteration(self):
-        """ implementation of iteration computation """
-        self.encoder.train()
-        self.decoder.train()
-
-        self.optimizer.zero_grad()
-
-        input_feat = self.data.cuda()
-
-        batch_size = input_feat.size(0)
-
-        noise_mask = 0.02 * (torch.rand(input_feat.size()) / 1) + 0.98
-        noise_input_feat = noise_mask.cuda() * input_feat
-
-        #print (noise_input_feat.min(), noise_input_feat.max())
-
-
-        z = self.encoder(noise_input_feat)
-        recon = self.decoder(z)
-
-        print (recon.size())
-
-        # loss
-
-        self.loss_train_total = self.mseLoss(recon, input_feat)
-        self.loss.append(self.loss_train_total.item())
-
-        self.loss_train_total.backward()
-        self.optimizer.step()
-        self.print_iteration_stats()
-        self.increment_iteration()
-
-    def valid_iteration(self):
-
-        self.encoder.eval()
-        self.decoder.eval()
-
-        input_feat = self.data.cuda()
-
-        z = self.encoder(input_feat)
-        recon = self.decoder(z)
-
-        # loss
-        self.loss_train_total = self.mseLoss(recon, input_feat)
-        self.loss.append(self.loss_train_total.item())
-
-        self.loss_train_total.backward()
-        self.increment_iteration()
-
-
-    def train_epoch(self):
-
-        self.reset_iteration()
-        self.loss = []
-        for step, data in enumerate(self.train_loader):
-            self.data = data
-            self.train_iteration()
-        self.loss = torch.Tensor(self.loss)
-        self.loss = torch.mean(self.loss)
-        self.vis.draw_line(win = 'Train Loss', x = self.epoch, y = self.loss)
-
-    def valid_epoch(self):
-        self.reset_iteration()
-        self.loss = []
-        for step, data in enumerate(self.valid_loader):
-            self.data = data
-            self.valid_iteration()
-
-        self.loss = torch.Tensor(self.loss)
-        self.loss = torch.mean(self.loss)
-        self.vis.draw_line(win = 'Valid Loss', x = self.epoch, y = self.loss)
-
-    def save_network(self):
-        print("\nsaving net...")
-        torch.save(self.encoder.state_dict(), f"{self.opt.save_path}/Encoder.pth")
-        torch.save(self.decoder.state_dict(), f"{self.opt.save_path}/Decoder.pth")
-
-class AdversarialAutoEncoderTrainer(AbstractTrainer):
+class AAETrainer(AbstractTrainer):
     def __init__(self, opt):
         super().__init__(opt)
         self.opt = opt
@@ -281,166 +157,163 @@ class AdversarialAutoEncoderTrainer(AbstractTrainer):
         self.vis = utils.Visualizer(env = 'Adversarial AutoEncoder Training', port = 8888)
 
     def build_network(self):
-        print ('- Build the network architecture')
-        self.encoder = Encoder(input_dim = self.feat_dim, hidden_dim = 512, latent_dim = 128)
-        self.decoder = Decoder(latent_dim = 128, hidden_dim = 512, output_dim = self.feat_dim)
+        print ('[info] Build the network architecture')
+        self.encoder = Encoder()
+        self.decoder = Decoder()
         self.discriminator = Discriminator()
-
-        encoder_weights = self.opt.save_path + 'Encoder.pth'
-        decoder_weights = self.opt.save_path + 'Decoder.pth'
-        discriminator_weights = self.opt.save_path + 'Discriminator.pth'
-
-        self.encoder.load_state_dict(torch.load(encoder_weights))
-        self.decoder.load_state_dict(torch.load(decoder_weights))
-        self.discriminator.load_state_dict(torch.load(discriminator_weights))
 
         self.encoder.cuda()
         self.decoder.cuda()
         self.discriminator.cuda()
 
     def build_optimizer(self):
-        print ('- Build the optimizer')
-        self.optim_dis = optim.Adam(self.discriminator.parameters(), lr = self.opt.learning_rate, betas = (self.opt.beta1, self.opt.beta2))
-        self.optim_dec = optim.Adam(self.decoder.parameters(), lr = self.opt.learning_rate, betas = (self.opt.beta1, self.opt.beta2))
-        self.optim_enc = optim.Adam(self.encoder.parameters(), lr = self.opt.learning_rate, betas = (self.opt.beta1, self.opt.beta2))
+        print ('[info] Build the optimizer')
+        self.optim_dis = optim.SGD(self.discriminator.parameters(), lr = self.opt.learning_rate)
+        self.optim_AE = optim.Adam(itertools.chain(self.encoder.parameters(), self.decoder.parameters()), lr = self.opt.learning_rate)
 
     def build_dataset_train(self):
-        train_data = SmplRIMD()
-        self.feat_dim = train_data.__getitem__(0).shape[0]
+        train_data = ACAPData(mode = 'train', name = 'SMPL')
         self.num_train_data = len(train_data)
-        print ('Number of training samples = ', self.num_train_data)
-        self.train_loader = torch.utils.data.DataLoader(train_data, batch_size = self.opt.batch_size, shuffle = True, num_workers = self.opt.workers)
+        print ('[info] Number of training samples = ', self.num_train_data)
+        self.train_loader = torch.utils.data.DataLoader(train_data, batch_size = self.opt.batch_size, shuffle = True)
 
     def build_dataset_valid(self):
-        valid_data = SmplRIMD()
-        self.feat_dim = valid_data.__getitem__(0).shape[0]
+        valid_data = ACAPData(mode = 'valid', name = 'SMPL')
         self.num_valid_data = len(valid_data)
-        print ('Number of valid samples = ', self.num_valid_data)
-        self.valid_loader = torch.utils.data.DataLoader(valid_data, batch_size = 16, shuffle = True, num_workers = self.opt.workers)
-
+        print ('[info] Number of training samples = ', self.num_valid_data)
+        self.valid_loader = torch.utils.data.DataLoader(valid_data, batch_size = 128, shuffle = True)
 
     def build_losses(self):
-        print ('- Build the loss functions')
-        self.ganLoss = torch.nn.BCEWithLogitsLoss()
-        self.recLoss = torch.nn.MSELoss()
+        print ('[info] Build the loss functions')
+        self.mseLoss = torch.nn.MSELoss()
+        self.ganLoss = torch.nn.BCELoss()
 
     def print_iteration_stats(self):
         """
         print stats at each iteration
         """
-        print ('\r[Epoch %d] [Iteration %d/%d] Loss_Enc = %f Loss_Dec = %f Loss_Dis = %f' % (
+        print ('\r[Epoch %d] [Iteration %d/%d] enc = %f dis = %f rec = %f' % (
             self.epoch,
             self.iteration,
             int(self.num_train_data/self.opt.batch_size),
-            self.loss_enc.item(),
-            self.loss_dec.item(),
-            self.loss_dis.item()), end = '')
+            self.enc_loss.item(),
+            self.dis_loss.item(),
+            self.rec_loss.item()), end = '')
+
+    def sample_from_sphere(self, batch_size):
+
+        # step 1. Sample vectors from arbitrary prior, N(0, I) here
+        rand_pts = torch.randn(batch_size, 128)
+
+        # step 2. Centerization
+        rand_pts -= rand_pts.mean(0)
+
+        # step 3. Spherization
+        for i in range(batch_size):
+            rand_pts[i] /= rand_pts[i].norm()
+        
+        return rand_pts
 
     def train_iteration(self):
-        """ implementation of iteration computation """
+
         self.encoder.train()
         self.decoder.train()
         self.discriminator.train()
-
-        batch_size = self.data.size(0)
 
         x = self.data.cuda()
         z = self.encoder(x)
 
         ''' Discriminator '''
-        z_real = torch.randn(batch_size, z.size(1)).cuda()
-        y_real = torch.ones(batch_size).cuda()
+        # sample from N(0, I)
+        #z_real = Variable(torch.randn(z.size(0), z.size(1))).cuda()
+
+        # sample surface points from a sphere
+        z_real = self.sample_from_sphere(z.size(0)).cuda()
+
+        y_real = Variable(torch.ones(z.size(0))).cuda()
         dis_real_loss = self.ganLoss(self.discriminator(z_real).view(-1), y_real)
 
-        y_fake = torch.zeros(batch_size).cuda()
+        y_fake = Variable(torch.zeros(z.size(0))).cuda()
         dis_fake_loss = self.ganLoss(self.discriminator(z).view(-1), y_fake)
 
         self.optim_dis.zero_grad()
-        self.loss_dis = dis_fake_loss + dis_real_loss
-        self.loss_dis.backward(retain_graph = True)
+        self.dis_loss = 0.5 * (dis_fake_loss + dis_real_loss)
+        self.dis_loss.backward(retain_graph = True)
         self.optim_dis.step()
-        self.dis_losses.append(self.loss_dis.item())
-        ''' ------------- '''
+        self.dis_losses.append(self.dis_loss.item())
 
-        '''    Encoder    '''
-        y_real = torch.ones(batch_size).cuda()
-        enc_gan_loss = self.ganLoss(self.discriminator(z).view(-1), y_real)
+        ''' Autoencoder '''
+        # Encoder hopes to generate latent vectors that are closed to prior.
+        y_real = Variable(torch.ones(z.size(0))).cuda()
+        self.enc_loss= self.ganLoss(self.discriminator(z).view(-1), y_real)
 
-        self.loss_enc = enc_gan_loss
-        self.optim_enc.zero_grad()
-        self.loss_enc.backward(retain_graph = True)
-        self.optim_enc.step()
-        self.enc_losses.append(self.loss_enc.item())
-        ''' ------------- '''
-
-        '''    Decoder    '''
+        # Decoder hopes to make the reconstruction as similar to input as possible.
         rec = self.decoder(z)
-        self.loss_dec = self.recLoss(rec, x)
-        self.optim_dec.zero_grad()
-        self.loss_dec.backward()
-        self.optim_dec.step()
-        self.dec_losses.append(self.loss_dec.item())
-        ''' ------------- '''
+        self.rec_loss = self.mseLoss(rec, x)
+
+        self.EG_loss = self.enc_loss + self.rec_loss
+
+        self.optim_AE.zero_grad()
+        self.EG_loss.backward()
+        self.optim_AE.step()
+
+        self.enc_losses.append(self.enc_loss.item())
+        self.rec_losses.append(self.rec_loss.item())
 
         self.print_iteration_stats()
         self.increment_iteration()
 
-    def valid_iteration(self):
-        self.encoder.eval()
-        self.decoder.eval()
-        self.discriminator.eval()
-
-        batch_size = self.data.size(0)
-
-        x = self.data.cuda()
-        z = self.encoder(x)
-        rec = self.decoder(z)
-
-        self.loss_dec = self.recLoss(rec, x)
-        self.dec_losses.append(self.loss_dec.item())
-
-        self.increment_iteration()
-
     def train_epoch(self):
-        self.reset_iteration()
 
+        self.reset_iteration()
         self.dis_losses = []
         self.enc_losses = []
-        self.dec_losses = []
-
+        self.rec_losses = []
         for step, data in enumerate(self.train_loader):
             self.data = data
             self.train_iteration()
 
-        loss_enc = torch.Tensor(self.enc_losses)
-        loss_enc = torch.mean(loss_enc)
+        self.dis_losses = torch.Tensor(self.dis_losses)
+        self.dis_losses = torch.mean(self.dis_losses)
 
-        loss_dec = torch.Tensor(self.dec_losses)
-        loss_dec = torch.mean(loss_dec)
+        self.enc_losses = torch.Tensor(self.enc_losses)
+        self.enc_losses = torch.mean(self.enc_losses)
 
-        loss_dis = torch.Tensor(self.dis_losses)
-        loss_dis = torch.mean(loss_dis)
+        self.rec_losses = torch.Tensor(self.rec_losses)
+        self.rec_losses = torch.mean(self.rec_losses)
 
-        self.vis.draw_line(win = 'Encoder Loss', x = self.epoch, y = loss_enc)
-        self.vis.draw_line(win = 'Decoder Loss', x = self.epoch, y = loss_dec)
-        self.vis.draw_line(win = 'Discriminator Loss', x = self.epoch, y = loss_dis)
+        self.vis.draw_line(win = 'Encoder Loss', x = self.epoch, y = self.enc_losses)
+        self.vis.draw_line(win = 'Discriminator Loss', x = self.epoch, y = self.dis_losses)
+        self.vis.draw_line(win = 'Reconstruction Loss', x = self.epoch, y = self.rec_losses)
+    
+    def valid_iteration(self):
+
+        self.encoder.eval()
+        self.decoder.eval()
+        self.discriminator.eval()
+
+        x = self.data.cuda()
+        z = self.encoder(x)
+        recon = self.decoder(z)
+
+        # loss
+        rec_loss = self.mseLoss(recon, x)
+        self.rec_loss.append(rec_loss.item())
+        self.increment_iteration()
 
     def valid_epoch(self):
         self.reset_iteration()
-
-        self.dec_losses = []
-
+        self.rec_loss = []
         for step, data in enumerate(self.valid_loader):
             self.data = data
             self.valid_iteration()
 
-        loss_dec = torch.Tensor(self.dec_losses)
-        loss_dec = torch.mean(loss_dec)
-
-        self.vis.draw_line(win = 'Decoder Loss (Validation process)', x = self.epoch, y = loss_dec)
-
+        self.rec_loss = torch.Tensor(self.rec_loss)
+        self.rec_loss = torch.mean(self.rec_loss)
+        self.vis.draw_line(win = 'Valid reconstruction loss', x = self.epoch, y = self.rec_loss)
+    
     def save_network(self):
-        print("\nsaving net...")
+        print("\n[info] saving net...")
         torch.save(self.encoder.state_dict(), f"{self.opt.save_path}/Encoder.pth")
         torch.save(self.decoder.state_dict(), f"{self.opt.save_path}/Decoder.pth")
         torch.save(self.discriminator.state_dict(), f"{self.opt.save_path}/Discriminator.pth")

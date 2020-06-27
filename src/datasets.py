@@ -1,10 +1,9 @@
 from torch.utils.data import Dataset
 import numpy as np
 
-class SmplRIMD(Dataset):
-    def __init__(self, mode = 'train'):
-        #self.path = './rimd-feature/SMPL/'
-        self.path = './ACAP-data/SMPL/'
+class ACAPData(Dataset):
+    def __init__(self, mode = 'train', name = 'SMPL'):
+        self.path = './ACAP-data/' + name + '/'
         self.mode = mode
 
     def __getitem__(self, index):

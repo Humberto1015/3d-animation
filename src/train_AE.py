@@ -27,4 +27,4 @@ if __name__ == '__main__':
         trainer.increment_epoch()
     end_time = time.time()
 
-    print ('It cost %f seconds to train the source model.' % (end_time - start_time))
+    print ('It cost %f seconds to train the AE model.' % (end_time - start_time))
