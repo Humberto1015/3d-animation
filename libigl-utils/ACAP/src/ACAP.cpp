@@ -1,17 +1,20 @@
 #include "ACAP.h"
 
-ACAP::ACAP(Mesh& base){
-    this->baseMesh = &base;
+
+ACAP::ACAP(Mesh* mesh, bool use_quat){
+    this->baseMesh = mesh;
+    this->use_quaternion = use_quat;
 }
 
-void ACAP::setTargetMesh(Mesh& target){
-    this->targetMesh = &target;
+void ACAP::setTargetMesh(Mesh* target){
+    this->targetMesh = target;
 }
 
 void ACAP::solveTransform(){
-    std::vector<Eigen::Matrix3d> T_matrices;
 
-    int num_verts = this->baseMesh->verts.rows();
+    auto num_verts = this->baseMesh->verts.rows();
+
+    std::vector<Eigen::Matrix3d> T_matrices(num_verts);
 
     // for each vertex vi, compute Ti
     for (int i = 0; i < num_verts; ++i){
@@ -65,18 +68,21 @@ void ACAP::solveTransform(){
                 T(m, n) = solution(m * 3 + n);
             }
         }
-        T_matrices.emplace_back(T.transpose()); //T.transpose()
+        T_matrices[i] = T.transpose();
     }
-
     this->transforms = T_matrices;
 }
 
 std::vector<double> ACAP::solveFeature(){
 
-    // number of one rings
+    // number of 1-rings
     int n = baseMesh->verts.rows();
 
     std::vector<double> feat(n * 9);
+
+    if (this->use_quaternion)
+        feat.resize(n * 10);
+
 
     std::vector<Eigen::Vector3d> axis(n);
     std::vector<double> angles(n);
@@ -92,91 +98,89 @@ std::vector<double> ACAP::solveFeature(){
         S[i] = decom[1];
     }
 
+    // To do
+    // step 1. solve the optimal axis set here
+    AxisSolver orienSolver;
+    orienSolver.solve(axis, this->baseMesh->neighbors);
+
+    auto oriens = orienSolver.solution;
+    for (int i = 0; i < axis.size(); ++i)
+        axis[i] *= oriens[i];
+
+    // step 2. solve the optimal angle set here
+    AngleSolver angleSolver;
+    angleSolver.solve(angles, oriens, this->baseMesh->neighbors);
+    for (int i = 0; i < angles.size(); ++i){
+        std::cout << angleSolver.solution[i] << "\n";
+        angles[i] = 2 * M_PI * angleSolver.solution[i] + oriens[i] * angles[i];
+    }
+
     int idx = 0;
     // set the quaternion representation of the first 1-ring
     Eigen::AngleAxisd V_0(angles[0], axis[0]);
     Eigen::Quaterniond Q_0(V_0);
 
     for (int i = 0; i < n; ++i){
-        //auto V_i = angles[i] * axis[i];
         Eigen::AngleAxisd V_i(angles[i], axis[i]);
         Eigen::Quaterniond Q_i(V_i);
 
+        // cancel out the global rotation to make all meshes have the same orientation
         Q_i = Q_0.inverse() * Q_i;
 
-        // quaternion 2 rotation vector
+        // debug:
+        //printf("%f %f %f %f\n", Q_i.w(), Q_i.x(), Q_i.y(), Q_i.z());
+
+        // convert quaternion to rotation vector
         Eigen::AngleAxisd V_i_prime(Q_i);
         auto rotVec = V_i_prime.angle() * V_i_prime.axis();
 
-        auto theta_x = rotVec(0);
-        auto theta_y = rotVec(1);
-        auto theta_z = rotVec(2);
+        // option 1. take rotation vector as feature
+        if (!this->use_quaternion){
+            feat[idx++] = rotVec(0);
+            feat[idx++] = rotVec(1);
+            feat[idx++] = rotVec(2);
+        }
 
-        Eigen::Matrix3d logdR_i = Eigen::Matrix3d::Zero();
-        auto S_i = S[i];
+        // option 2. take quaternion as feature (under experiments)
+        else{
+            feat[idx++] = Q_i.w();
+            feat[idx++] = Q_i.x();
+            feat[idx++] = Q_i.y();
+            feat[idx++] = Q_i.z();
+        }
+        
 
-        //logdR_i(2, 1) = theta_x;
-        //logdR_i(1, 2) = -theta_x;
-        //logdR_i(0, 2) = theta_y;
-        //logdR_i(2, 0) = -theta_y;
-        //logdR_i(1, 0) = theta_z;
-        //logdR_i(0, 1) = -theta_z;
-
-        // content: [theta_x, theta_y, theta_z, the upper triangle of the S matrix]
-        feat[idx++] = theta_x;
-        feat[idx++] = theta_y;
-        feat[idx++] = theta_z;
-
-        //feat[idx++] = Q_i.w();
-        //feat[idx++] = Q_i.x();
-        //feat[idx++] = Q_i.y();
-        //feat[idx++] = Q_i.z();
-
-        //printf("%f %f %f %f\n", Q_i.w(), Q_i.x(), Q_i.y(), Q_i.z());
-
-
-        feat[idx++] = S_i(0, 0);
-        feat[idx++] = S_i(0, 1);
-        feat[idx++] = S_i(0, 2);
-        feat[idx++] = S_i(1, 1);
-        feat[idx++] = S_i(1, 2);
-        feat[idx++] = S_i(2, 2);
+        feat[idx++] = S[i](0, 0);
+        feat[idx++] = S[i](0, 1);
+        feat[idx++] = S[i](0, 2);
+        feat[idx++] = S[i](1, 1);
+        feat[idx++] = S[i](1, 2);
+        feat[idx++] = S[i](2, 2);
     }
+
+    std::cout << "[info] the length of ACAP feature = " << feat.size() << "\n";
+
     return feat;
 }
 
 Eigen::MatrixXd ACAP::solveRecon(const std::vector<double>& feat){
 
-        int num_verts = this->baseMesh->verts.rows();
+    int num_verts = this->baseMesh->verts.rows();
 
-        // Step 1. Convert the ACAP features to an array of affine matrices
-        int idx = 0;
+    // Step 1. Convert the ACAP features to an array of affine matrices
+    std::vector<Eigen::Matrix3d> R;
+    std::vector<Eigen::Matrix3d> S;
+    std::vector<Eigen::Matrix3d> affines(num_verts);
+    int idx = 0;
+    for (int i = 0; i < affines.size(); ++i){
+        Eigen::Matrix3d R_i = Eigen::Matrix3d::Zero();
+        Eigen::Matrix3d S_i = Eigen::Matrix3d::Zero();
 
-        std::vector<Eigen::Matrix3d> R;
-        std::vector<Eigen::Matrix3d> S;
-        std::vector<Eigen::Matrix3d> affines(num_verts);
-
-        for (int i = 0; i < affines.size(); ++i){
-            Eigen::Matrix3d R_i = Eigen::Matrix3d::Zero();
-            Eigen::Matrix3d S_i = Eigen::Matrix3d::Zero();
-
-            //double q_w, q_x, q_y, q_z;
-            //q_w = feat[idx++];
-            //q_x = feat[idx++];
-            //q_y = feat[idx++];
-            //q_z = feat[idx++];
-
+        // option 1. recover from logR-based representation
+        if (!this->use_quaternion){
             double theta_x = feat[idx++];
             double theta_y = feat[idx++];
             double theta_z = feat[idx++];
-
-            Eigen::AngleAxisd r_x(theta_x, Eigen::Vector3d(1, 0, 0));
-            Eigen::AngleAxisd r_y(theta_y, Eigen::Vector3d(0, 1, 0));
-            Eigen::AngleAxisd r_z(theta_z, Eigen::Vector3d(0, 0, 1));
-
-            //Eigen::Quaterniond Q_i(r_x * r_y * r_z);
-            //R_i = Q_i.matrix();
-
             R_i(2, 1) = theta_x;
             R_i(1, 2) = -theta_x;
             R_i(0, 2) = theta_y;
@@ -184,86 +188,99 @@ Eigen::MatrixXd ACAP::solveRecon(const std::vector<double>& feat){
             R_i(1, 0) = theta_z;
             R_i(0, 1) = -theta_z;
             R_i = R_i.exp();
-
-            R.emplace_back(R_i);
-
-            S_i(0, 0) = feat[idx++];
-            S_i(0, 1) = S_i(1, 0) = feat[idx++];
-            S_i(0, 2) = S_i(2, 0) = feat[idx++];
-            S_i(1, 1) = feat[idx++];
-            S_i(1, 2) = S_i(2, 1) = feat[idx++];
-            S_i(2, 2) = feat[idx++];
-
-            S.emplace_back(S_i);
-
-            affines[i] = R_i * S_i;
+        }
+        // option 2. recover from quaternion-based representation
+        else{
+            auto q_w = feat[idx++];
+            auto q_x = feat[idx++];
+            auto q_y = feat[idx++];
+            auto q_z = feat[idx++];
+            Eigen::Quaterniond Q_i(q_w, q_x, q_y, q_z);
+            R_i = Q_i.matrix();
         }
 
+        //Eigen::AngleAxisd r_x(theta_x, Eigen::Vector3d(1, 0, 0));
+        //Eigen::AngleAxisd r_y(theta_y, Eigen::Vector3d(0, 1, 0));
+        //Eigen::AngleAxisd r_z(theta_z, Eigen::Vector3d(0, 0, 1));
 
-        // Step 2. Solve the least suqare system
-        Eigen::SparseMatrix<double> A(3 * num_verts, 3 * num_verts);
-        Eigen::VectorXd b = Eigen::VectorXd::Zero(3 * num_verts);
-        Eigen::VectorXd x;
+        R.emplace_back(R_i);
 
-        typedef Eigen::Triplet<double> T;
-        std::vector<T> tripletList;
+        S_i(0, 0) = feat[idx++];
+        S_i(0, 1) = S_i(1, 0) = feat[idx++];
+        S_i(0, 2) = S_i(2, 0) = feat[idx++];
+        S_i(1, 1) = feat[idx++];
+        S_i(1, 2) = S_i(2, 1) = feat[idx++];
+        S_i(2, 2) = feat[idx++];
 
-        // build the least-square system
-        for (int i = 0; i < num_verts; ++i){
-            // fill A
-            double cotSum = 0;
-            for (auto c_ij: this->baseMesh->cot_weights[i])
-                cotSum += c_ij;
+        S.emplace_back(S_i);
 
-            tripletList.emplace_back(T(3 * i, 3 * i, cotSum));
-            tripletList.emplace_back(T(3 * i + 1, 3 * i + 1, cotSum));
-            tripletList.emplace_back(T(3 * i + 2, 3 * i + 2, cotSum));
-
-            for (int j = 0; j < this->baseMesh->neighbors[i].size(); ++j){
-                int vj_index = this->baseMesh->neighbors[i][j];
-                double c_ij = this->baseMesh->cot_weights[i][j];
-
-                tripletList.emplace_back(T(3 * i, 3 * vj_index, -c_ij));
-                tripletList.emplace_back(T(3 * i + 1, 3 * vj_index + 1, -c_ij));
-                tripletList.emplace_back(T(3 * i + 2, 3 * vj_index + 2, -c_ij));
-            }
-            // fill b
-            Eigen::VectorXd term = Eigen::VectorXd::Zero(3);
-            for (int j = 0; j < this->baseMesh->neighbors[i].size(); ++j){
-                int vj_index = this->baseMesh->neighbors[i][j];
-                double c_ij = this->baseMesh->cot_weights[i][j];
-                Eigen::Vector3d q_j = this->baseMesh->verts.row(vj_index);
-                Eigen::Vector3d q_i = this->baseMesh->verts.row(i);
-                term += c_ij * (affines[i] + affines[vj_index]) * (q_i - q_j);
-            }
-            b(3 * i) = term(0);
-            b(3 * i + 1) = term(1);
-            b(3 * i + 2) = term(2);
-        }
-        A.setFromTriplets(tripletList.begin(), tripletList.end());
-
-        // Do Cholesky factorization on the A matrix
-        Eigen::SimplicialCholesky<Eigen::SparseMatrix<double> > solver;
-        solver.compute(A);
-        if (solver.info() != Eigen::Success) {
-            //Decomposition failed
-            std::cout << "Decomposition failed." << std::endl;
-            exit(1);
-        }
-
-        x = solver.solve(b);
-
-        Eigen::MatrixXd verts(num_verts, 3);
-
-        for (int i = 0; i < num_verts; ++i){
-            Eigen::Vector3d row;
-            row(0) = x(3 * i);
-            row(1) = x(3 * i + 1);
-            row(2) = x(3 * i + 2);
-            verts.row(i) = row;
-        }
-        return verts;
+        affines[i] = R_i * S_i;
     }
+
+
+    // Step 2. Solve the least suqare system
+    Eigen::SparseMatrix<double> A(3 * num_verts, 3 * num_verts);
+    Eigen::VectorXd b = Eigen::VectorXd::Zero(3 * num_verts);
+    Eigen::VectorXd x;
+
+    typedef Eigen::Triplet<double> T;
+    std::vector<T> tripletList;
+
+    // build the least-square system
+    for (int i = 0; i < num_verts; ++i){
+        // fill A
+        double cotSum = 0;
+        for (auto c_ij: this->baseMesh->cot_weights[i])
+            cotSum += c_ij;
+
+        tripletList.emplace_back(T(3 * i, 3 * i, cotSum));
+        tripletList.emplace_back(T(3 * i + 1, 3 * i + 1, cotSum));
+        tripletList.emplace_back(T(3 * i + 2, 3 * i + 2, cotSum));
+
+        for (int j = 0; j < this->baseMesh->neighbors[i].size(); ++j){
+            int vj_index = this->baseMesh->neighbors[i][j];
+            double c_ij = this->baseMesh->cot_weights[i][j];
+
+            tripletList.emplace_back(T(3 * i, 3 * vj_index, -c_ij));
+            tripletList.emplace_back(T(3 * i + 1, 3 * vj_index + 1, -c_ij));
+            tripletList.emplace_back(T(3 * i + 2, 3 * vj_index + 2, -c_ij));
+        }
+        // fill b
+        Eigen::VectorXd term = Eigen::VectorXd::Zero(3);
+        for (int j = 0; j < this->baseMesh->neighbors[i].size(); ++j){
+            int vj_index = this->baseMesh->neighbors[i][j];
+            double c_ij = this->baseMesh->cot_weights[i][j];
+            Eigen::Vector3d q_j = this->baseMesh->verts.row(vj_index);
+            Eigen::Vector3d q_i = this->baseMesh->verts.row(i);
+            term += c_ij * (affines[i] + affines[vj_index]) * (q_i - q_j);
+        }
+        b(3 * i) = term(0);
+        b(3 * i + 1) = term(1);
+        b(3 * i + 2) = term(2);
+    }
+    A.setFromTriplets(tripletList.begin(), tripletList.end());
+
+    // Do Cholesky factorization on A matrix to speed up the optimization
+    Eigen::SimplicialCholesky<Eigen::SparseMatrix<double> > solver;
+    solver.compute(A);
+    if (solver.info() != Eigen::Success) {
+        //Decomposition failed
+        std::cout << "Decomposition failed." << std::endl;
+        exit(1);
+    }
+    x = solver.solve(b);
+
+    Eigen::MatrixXd verts(num_verts, 3);
+
+    for (int i = 0; i < num_verts; ++i){
+        Eigen::Vector3d row;
+        row(0) = x(3 * i);
+        row(1) = x(3 * i + 1);
+        row(2) = x(3 * i + 2);
+        verts.row(i) = row;
+    }
+    return verts;
+}
 
 std::vector<Eigen::Matrix3d> ACAP::polarDecomposition(const Eigen::Matrix3d& T){
 
@@ -282,141 +299,4 @@ std::vector<Eigen::Matrix3d> ACAP::polarDecomposition(const Eigen::Matrix3d& T){
     decomposition.emplace_back(Scale);
 
     return decomposition;
-}
-
-void ACAP::optimizeRotation(std::vector<double>& angles, std::vector<Eigen::Vector3d>& axis){
-    // number of one rings
-    int n = angles.size();
-
-    // step 1. solve the orientations
-    std::vector<int> orientations;
-    solveOrientation(axis, orientations);
-
-    // step 2. solve the angles
-    std::vector<int> cycles;
-    solveCycle(angles, orientations, cycles);
-
-    // step 3. update axis and angle
-    for (int i = 0; i < n; ++i){
-        axis[i] = axis[i] * orientations[i];
-        angles[i] = cycles[i] * 2 * igl::PI + orientations[i] * angles[i];
-    }
-}
-
-double ACAP::measureOrien(const Eigen::Vector3d& A, const Eigen::Vector3d& B){
-    double eps_1 = 1e-6;
-    double eps_2 = 1e-3;
-
-    double inner_product = A.dot(B);
-
-    if (fabs(inner_product) <= eps_1)
-        return 1e-8;
-
-    else if (inner_product > eps_1)
-        return 1;
-
-    else if (inner_product < -eps_1)
-        return -1;
-}
-
-void ACAP::BFS(const std::vector<Eigen::Vector3d>& axis, std::vector<int>& initGuess){
-
-    // Define some constant
-    int white = -2; // undiscover
-    int gray = -1; // if u is discovered, the adjacent vertex v is undiscovered
-    int black = 0; // discovered
-
-    int n = this->baseMesh->verts.rows();
-    // Create the color list which denotes the state of visitation
-    std::vector<int> Color(n, white);
-
-    initGuess.clear();
-    initGuess.resize(n);
-
-    // Visit the start vertex
-    // I take the first vertex as the start vertex
-    int s = 0;
-    Color[s] = gray;
-    initGuess[s] = 1;
-
-    // Create an empty queue
-    std::queue<int> Q;
-    Q.push(s);
-
-    while (!Q.empty()) {
-        int u = Q.front();
-        Q.pop();
-        for (int i = 0; i < this->baseMesh->neighbors[u].size(); i++) {
-            int v = this->baseMesh->neighbors[u][i];
-
-            if (Color[v] == white) {
-                Color[v] = gray;
-                Q.push(v);
-
-                auto indicater = measureOrien(axis[u], axis[v]);
-
-                if (initGuess[u] * indicater < 0){
-                    initGuess[v] = 1;
-                }
-                else{
-                    initGuess[v] = 0;
-                }
-            }
-        }
-        Color[u] = black;
-    }
-
-}
-
-void ACAP::solveOrientation(const std::vector<Eigen::Vector3d>& axis, std::vector<int>& res){
-
-    // step 1. get all edge pairs
-    std::vector<std::pair<int, int> > edges;
-    std::vector<std::vector<int> > visited(axis.size());
-    for (int i = 0; i < visited.size(); ++i)
-        visited[i] = std::vector<int>(axis.size(), 0);
-    for (int i = 0; i < baseMesh->neighbors.size(); ++i){
-        for (int j = 0; j < baseMesh->neighbors[i].size(); ++j){
-            auto v_j = baseMesh->neighbors[i][j];
-            if (i != v_j && (!visited[i][v_j] || !visited[v_j][i])){
-                edges.emplace_back(std::make_pair(i, v_j));
-                visited[i][v_j] = visited[v_j][i] = 1;
-            }
-        }
-    }
-    // step 2. compute initial solution
-    std::vector<int> initSol;
-    BFS(axis, initSol);
-
-    // step 3. build the MIQP and solve it by CPLEX
-    OrientationSolver orienSolver(edges, axis);
-    orienSolver.setInitSol(initSol);
-    orienSolver.solve(res);
-}
-
-void ACAP::solveCycle(const std::vector<double>& angles, const std::vector<int>& orientations, std::vector<int>& cycles){
-    // step 1. get edge indices
-    std::vector<std::pair<int, int> > edges;
-    //getEdges(edges);
-    for (int i = 0; i < baseMesh->neighbors.size(); ++i){
-        for (int j = 0; j < baseMesh->neighbors[i].size(); ++j)
-            edges.emplace_back(std::make_pair(i, j));
-    }
-
-    // step 2. build the MIQP and solve it by CPLEX
-    AngleSolver angleSolver(edges, angles, orientations);
-    angleSolver.solve(cycles);
-
-    int a = 0;
-    int b = 0;
-    int c = 0;
-    for (auto cyc: cycles){
-        if (cyc == 0)
-            a++;
-        if (cyc == -1)
-            b++;
-        if (cyc == 1)
-            c++;
-    }
-    printf("[info] 0: %d, -1: %d, 1: %d\n", a, b, c);
 }
