@@ -13,7 +13,6 @@ from scipy.sparse.csgraph import connected_components
 
 from sklearn.decomposition import PCA
 
-from mpl_toolkits.mplot3d import Axes3D
 
 class Graph:
     def __init__(self, encoder, decoder):
@@ -24,11 +23,15 @@ class Graph:
         self.edges = []
         self.dist = None
 
-        self.source_idx = 300
+        self.source_idx = 39
         self.target_idx = 364
+
+        print ('[info] source index: %d, target index: %d' % (self.source_idx, self.target_idx))
 
         self.loadData()
         self.buildConnectivity()
+        self.computeInitPath()
+        self.optimizePath()
 
     def loadData(self):
 
@@ -39,17 +42,21 @@ class Graph:
             self.nodes.append(z.squeeze(0).detach().numpy())
             
             # use fake data to debug first
-            #self.nodes.append(np.random.randn(2))
+            #self.nodes.append(np.random.randn(128).astype(np.float32))
         
         self.nodes = np.array(self.nodes)
-        print (self.nodes.shape)
-   
+    
+    # given a graph, output:
+    # (1) number of connected components
+    # (2) a list showing labels
     def findConnectedComponents(self, graph):
         graph = csr_matrix(graph)
         n_components, labels = connected_components(csgraph = graph, directed = False, return_labels = True)
         print ('[info] Number of connected components: ', n_components)
         return n_components, labels
     
+    # build the knn graph
+    # make the graph connected if necessary (if there are more than 1 connected components)
     def buildConnectivity(self):
 
         # precompute distances
@@ -58,7 +65,7 @@ class Graph:
         #dist, indices_all = nbrs.kneighbors(self.nodes)
 
         # step 1. build initial connectivity by finding k-nearest-neoghbors for each sample
-        G = kneighbors_graph(self.nodes, 4, mode = 'distance', include_self = True)
+        G = kneighbors_graph(self.nodes, 6, mode = 'distance', include_self = True)
         G = G.toarray()
 
         self.graph = G
@@ -78,54 +85,99 @@ class Graph:
         else:
             print ('[info] The graph is connected. [OK]')
 
-    def solvePath(self):
-        
+    
+    # compute the shortest path from source to target by dijkstra's algorithm
+    # and save indices in member variable "self.seq"
+    def computeInitPath(self):
         g = csr_matrix(self.graph)
-        dist_matrix, predecessors = dijkstra(csgraph=g, directed=False, indices=0, return_predecessors=True)
-        
-        self.predecessors = predecessors
-        #print (predecessors)
-
-    def show(self):
-
-        fig = plt.figure()
-        ax = Axes3D(fig)
-        
-        pca = PCA(n_components = 3)
-        embedded = pca.fit_transform(self.nodes)
-
-        xs, ys, zs = embedded.T
-
-        # plot nodes
-        ax.scatter(xs, ys, zs, c = 'black')
-        # plot edges
-        #for edge in self.edges:
-        #    s = edge[0]
-        #    t = edge[1]
-        #    plt.plot([xs[s], xs[t]], [ys[s], ys[t]], c = 'black', alpha = 0.25)
-
-        # plot shortest path
-        path = []
+        dist_matrix, predecessors = dijkstra(csgraph=g, directed=False, indices=self.source_idx, return_predecessors=True)
+        self.seq = []
         idx = self.target_idx
-        parent = self.predecessors[idx]
-        while parent > 0:
-            path.append([parent, idx])
-            idx = parent
-            parent = self.predecessors[idx]
+        while idx > 0:
+            self.seq.append(idx)
+            idx = predecessors[idx]
+        
+        self.seq.reverse()
+        print ('[info] Initial path:', self.seq)
+        length, length_av = self.computeLength()
+        print ('[info] Length = ', length)
+        print ('[info] Average length = ', length_av)
+    
+    def computeLength(self):
 
-        path.append([self.source_idx, idx])
+        nodes = self.nodes[self.seq]
+        length = 0
+        for i in range(nodes.shape[0] - 1):
+            length = length + np.linalg.norm(nodes[i] - nodes[i + 1])
 
-        for pair in path:
-            s = pair[0]
-            t = pair[1]
+        length_av = length / (nodes.shape[0] - 1)
 
-            print (s, t)
+        return length, length_av
 
-            ax.scatter(xs[s], ys[s], zs[s], c = 'green')
-            ax.scatter(xs[t], ys[t], zs[t], c = 'green')
-            ax.plot([xs[s], xs[t]], [ys[s], ys[t]], [zs[s], zs[t]], c = 'green')
+    # Bezier Curve
+    def one_bezier_curve(self, a,b,t):
+        return (1-t)*a + t*b
 
-        #plt.scatter(xs[self.source_idx], ys[self.source_idx], c = 'r')
-        #plt.scatter(xs[self.target_idx], ys[self.target_idx], c = 'r')
+    def n_bezier_curve(self, xs,n,k,t):
+        if n == 1:
+            return self.one_bezier_curve(xs[k],xs[k+1],t)
+        else:
+            return (1-t)*self.n_bezier_curve(xs,n-1,k,t) + t*self.n_bezier_curve(xs,n-1,k+1,t)
+
+    # points: [dim, num_points]
+    def bezier_curve(self, points, num_samples):
+        
+        n = points.shape[1] - 1
+        dim = points.shape[0]
+        t_step = 1.0 / (num_samples - 1)
+        t = np.arange(0.0, 1 + t_step, t_step)
+
+        res = np.zeros((dim, num_samples))
+        
+        for i in range(num_samples):
+            for j in range(dim):
+                res[j][i] = self.n_bezier_curve(points[j], n, 0, t[i])
+        
+        return res
+    
+
+    # Given the initial shortest path
+    # optimize the path to make it as smooth as possible
+    def optimizePath(self):
+        
+        print (self.seq)
+
+        init_nodes = self.nodes[self.seq]
+        init_nodes = init_nodes.transpose()
+        
+        n_samples = 30
+        samples = self.bezier_curve(init_nodes, n_samples)
+        samples = samples.transpose()
+        
+        self.solution = samples
+        
+
+    # Visualize the optimal path
+    def show(self):
+        pca = PCA(n_components = 2)
+        embedded = pca.fit_transform(self.nodes)
+        xs, ys = embedded.T
+        plt.scatter(xs, ys, c = 'gray')
+
+        plt.xlabel('1st principal component')
+        plt.ylabel('2nd principal component')
+
+        #n = len(self.seq)
+        path_nodes = self.solution
+        xs, ys = pca.transform(path_nodes).T
+        
+        # draw nodes
+        plt.scatter(xs, ys, c = 'red')
+        # draw edges
+        plt.plot(xs, ys, c = 'red', label = 'initial path')
+        #plt.arrow(nodes_x, nodes_y - nodes_x, c = 'green')
+            
+        # show linear interpolation path
+        plt.plot([xs[0], xs[-1]], [ys[0], ys[-1]], c = 'blue')
 
         plt.show()

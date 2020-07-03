@@ -6,7 +6,7 @@ import argparse
 import torch
 import torch.autograd
 import numpy as np
-from models import Encoder, Decoder, Encoder2, Decoder2
+from models import Encoder, Decoder
 from datasets import ACAPData
 from geodesicSolver import GeodesicSolver
 
@@ -15,18 +15,14 @@ from graph import Graph
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
+import bezier
+
 def shortest_path(encoder, decoder):
     g = Graph(encoder, decoder)
-    g.solvePath()
     g.show()
 
-def sample_from_gaussian(opt, encoder, decoder):
-    encoder = encoder.cuda()
-    decoder = decoder.cuda()
-
-    z = torch.randn(opt.in_betweens + 2, 128)
-
-    return z.detach().numpy()
+    
+    return g.solution.astype(np.float32)
 
 def linear_interpolation(opt, encoder, decoder):
 
@@ -77,11 +73,11 @@ def back_mapping(feat, minima, maxima):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--encoder_weights', type = str, default = './trained_weights/AAE_normal/Encoder.pth')
-    parser.add_argument('--decoder_weights', type = str, default = './trained_weights/AAE_normal/Decoder.pth')
+    parser.add_argument('--encoder_weights', type = str, default = './trained_weights/AAE_normal_75/Encoder.pth')
+    parser.add_argument('--decoder_weights', type = str, default = './trained_weights/AAE_normal_75/Decoder.pth')
     parser.add_argument('--s', type = str, help = 'The index of the first model')
     parser.add_argument('--t', type = str, help = 'The index of the second model')
-    parser.add_argument('--in_betweens', type = int, help = 'number of frames between the source and target model', default = 18)
+    parser.add_argument('--in_betweens', type = int, help = 'number of frames between the source and target model', default = 28)
     parser.add_argument('--minima_path', type = str, default = './ACAP-data/SMPL/minima.npy')
     parser.add_argument('--maxima_path', type = str, default = './ACAP-data/SMPL/maxima.npy')
     parser.add_argument('--target_path', type = str, default = './ACAP-sequence/')
@@ -97,16 +93,37 @@ if __name__ == '__main__':
     encoder.eval()
     decoder.eval()
 
+    if opt.mode == 'curve':
+
+        
+
+        nodes = np.random.randn(2, 5)
+        curve = bezier.Curve(nodes, degree = 4)
+        
+
+
+    # measure the latent space
     if opt.mode == 'gaussian':
-        seq_gaussian = sample_from_gaussian(opt, encoder, decoder)
-        minima = np.load(opt.minima_path)
-        maxima = np.load(opt.maxima_path)
-        recons = decoder(torch.from_numpy(seq_gaussian).cuda())
-        for i in range(recons.size(0)):
-            feat = back_mapping((recons[i].detach().cpu().numpy()).flatten(), minima, maxima)
-            file_name = opt.target_path + str(i) + '.npy'
-            np.save(file_name, feat)
-            print ('[info] Saved to %s' % file_name)
+
+        n = 10000
+        Z = np.zeros((n, 128))
+        Loss = np.zeros(n)
+        for i in range(n):
+            x = np.load('./ACAP-data/SMPL/' + str(i) + '_norm.npy').astype(np.float32)
+            x = torch.from_numpy(x)
+            z = encoder(x.unsqueeze(0))
+            decoded = decoder(z)
+            z = z.squeeze(0)
+            decoded = decoded.squeeze(0)
+            loss = (decoded - x).norm() / 6890
+            Loss[i] = loss
+            Z[i] = z.detach().numpy()
+        Z = np.array(Z)
+        Loss = np.array(Loss)
+        
+        print ('Mean of learned distribution: ', Z.mean())
+        print ('Std of learned distribution: ', Z.std())
+        print ('Average reconstruction error: ', loss.mean().item())
 
     if opt.mode == 'output_linear':
         seq_linear = linear_interpolation(opt, encoder, decoder)
@@ -119,46 +136,15 @@ if __name__ == '__main__':
             np.save(file_name, feat)
             print ('[info] Saved to %s' % file_name)
 
-    if opt.mode == 'output_geodesic':
-        seq_geodesic = geodesic_interpolation(opt, encoder, decoder)
+    if opt.mode == 'shortest_path':
+        seq = shortest_path(encoder, decoder)
         minima = np.load(opt.minima_path)
         maxima = np.load(opt.maxima_path)
-        recons = decoder(torch.from_numpy(seq_geodesic).cuda())
+        decoder = decoder.cuda()
+        encoder = encoder.cuda()
+        recons = decoder(torch.from_numpy(seq).cuda())
         for i in range(recons.size(0)):
             feat = back_mapping((recons[i].detach().cpu().numpy()).flatten(), minima, maxima)
             file_name = opt.target_path + str(i) + '.npy'
             np.save(file_name, feat)
             print ('[info] Saved to %s' % file_name)
-
-    if opt.mode == 'shortest_path':
-        shortest_path(encoder, decoder)
-    
-    # check if the learned distribution covers a sphere surface
-    if opt.mode == 'debug':
-
-        data = ACAPData()
-        data_loader = torch.utils.data.DataLoader(data, batch_size = 64, shuffle = False)
-
-        embedded = []
-        for step, samples in enumerate(data_loader):
-            codes = encoder(samples)
-            for code in codes:
-                embedded.append(code.detach().numpy())
-            
-            if step == 50:
-                break
-            
-        embedded = np.array(embedded)
-
-        # vis
-        embedded = np.array(embedded)
-        xs, ys, zs = embedded.T
-
-        fig = plt.figure()
-        ax = Axes3D(fig)
-        ax.set_xlim3d(-1.5, 1.5)
-        ax.set_ylim3d(-1.5, 1.5)
-        ax.set_zlim3d(-1, 1)
-
-        ax.scatter(xs, ys, zs)
-        plt.show()
