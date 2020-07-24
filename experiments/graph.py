@@ -1,7 +1,8 @@
 import numpy as np
 import torch
-
+import bezier
 import matplotlib.pyplot as plt
+import sympy
 
 from datasets import ACAPData
 
@@ -11,41 +12,31 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 from scipy.sparse.csgraph import connected_components
 
+import higra
+
 from sklearn.decomposition import PCA
 
+from timer import Timer
 
 class Graph:
-    def __init__(self, encoder, decoder):
-        self.encoder = encoder
-        self.decoder = decoder
-
-        self.nodes = []
-        self.edges = []
-        self.dist = None
-
-        self.source_idx = 39
-        self.target_idx = 364
-
-        print ('[info] source index: %d, target index: %d' % (self.source_idx, self.target_idx))
-
-        self.loadData()
-        self.buildConnectivity()
-        self.computeInitPath()
-        self.optimizePath()
-
-    def loadData(self):
-
-        for i in range(0, 5000):
-            x = np.load('./ACAP-data/SMPL/' + str(i) + '_norm.npy').astype(np.float32)
-            x = torch.from_numpy(x)
-            z = self.encoder(x.unsqueeze(0))
-            self.nodes.append(z.squeeze(0).detach().numpy())
-            
-            # use fake data to debug first
-            #self.nodes.append(np.random.randn(128).astype(np.float32))
+    def __init__(self, nodes):
         
-        self.nodes = np.array(self.nodes)
-    
+        self.timer = Timer()
+
+
+        self.nodes = nodes
+        self.edges = []
+
+        self.source_idx = None
+        self.target_idx = None
+        self.num_sample_nodes = 60
+
+        self.timer.start()
+        self.buildConnectivity()
+        self.timer.end()
+
+        print ('It cost %f sec to build graph connectivity.' % self.timer.time)
+
     # given a graph, output:
     # (1) number of connected components
     # (2) a list showing labels
@@ -60,27 +51,39 @@ class Graph:
     def buildConnectivity(self):
 
         # precompute distances
-        #n = self.nodes.shape[0]
-        #nbrs = NearestNeighbors(n_neighbors = n, algorithm = 'ball_tree', metric = 'euclidean').fit(self.nodes)
-        #dist, indices_all = nbrs.kneighbors(self.nodes)
+        n = self.nodes.shape[0]
+        # step 1. build the knn-mst graph
 
-        # step 1. build initial connectivity by finding k-nearest-neoghbors for each sample
-        G = kneighbors_graph(self.nodes, 6, mode = 'distance', include_self = True)
-        G = G.toarray()
+        # try to implement it without calling higra functions
+        G, weights = higra.make_graph_from_points(self.nodes, type = 'knn+mst', n_neighbors = 6)
 
+        # convert the graph to sparse matrix
+        rows = []
+        cols = []
+        vals = []
+        for e in G.edges():
+            row, col, idx = e
+            rows.append(row)
+            cols.append(col)
+            vals.append(weights[idx])
+
+        rows = np.array(rows)
+        cols = np.array(cols)
+        vals = np.array(vals)
+        G = csr_matrix((vals, (rows, cols)), shape = (n, n))
+
+        rows, cols = G.nonzero()
         self.graph = G
-        
-        for i in range(G.shape[0]):
-            for j in range(G[i].shape[0]):
-                if G[i][j] != 0:
-                    self.edges.append([i, j])
+
+        for i in range(rows.shape[0]):
+            self.edges.append([rows[i], cols[i]])
+
         # step 2. find connected components of the graph
-        n_components, labels = self.findConnectedComponents(G)
+        n_components, self.labels = self.findConnectedComponents(G)
         
         # step 3. check if source sample and target smaple in the same connected component
         if not n_components == 1:
             print ('[info] The graph is not connected.')
-            # do something here
 
         else:
             print ('[info] The graph is connected. [OK]')
@@ -89,95 +92,134 @@ class Graph:
     # compute the shortest path from source to target by dijkstra's algorithm
     # and save indices in member variable "self.seq"
     def computeInitPath(self):
-        g = csr_matrix(self.graph)
+        g = self.graph
         dist_matrix, predecessors = dijkstra(csgraph=g, directed=False, indices=self.source_idx, return_predecessors=True)
         self.seq = []
         idx = self.target_idx
-        while idx > 0:
+        while idx >= 0:
             self.seq.append(idx)
             idx = predecessors[idx]
         
         self.seq.reverse()
+        self.init_path = self.nodes[self.seq]
         print ('[info] Initial path:', self.seq)
-        length, length_av = self.computeLength()
-        print ('[info] Length = ', length)
-        print ('[info] Average length = ', length_av)
     
-    def computeLength(self):
-
-        nodes = self.nodes[self.seq]
-        length = 0
-        for i in range(nodes.shape[0] - 1):
-            length = length + np.linalg.norm(nodes[i] - nodes[i + 1])
-
-        length_av = length / (nodes.shape[0] - 1)
-
-        return length, length_av
-
-    # Bezier Curve
-    def one_bezier_curve(self, a,b,t):
-        return (1-t)*a + t*b
-
-    def n_bezier_curve(self, xs,n,k,t):
-        if n == 1:
-            return self.one_bezier_curve(xs[k],xs[k+1],t)
-        else:
-            return (1-t)*self.n_bezier_curve(xs,n-1,k,t) + t*self.n_bezier_curve(xs,n-1,k+1,t)
-
-    # points: [dim, num_points]
-    def bezier_curve(self, points, num_samples):
-        
-        n = points.shape[1] - 1
-        dim = points.shape[0]
-        t_step = 1.0 / (num_samples - 1)
-        t = np.arange(0.0, 1 + t_step, t_step)
-
-        res = np.zeros((dim, num_samples))
-        
-        for i in range(num_samples):
-            for j in range(dim):
-                res[j][i] = self.n_bezier_curve(points[j], n, 0, t[i])
-        
-        return res
-    
-
     # Given the initial shortest path
     # optimize the path to make it as smooth as possible
     def optimizePath(self):
         
-        print (self.seq)
-
         init_nodes = self.nodes[self.seq]
         init_nodes = init_nodes.transpose()
         
-        n_samples = 30
-        samples = self.bezier_curve(init_nodes, n_samples)
+        n_samples = self.num_sample_nodes
+        curve = bezier.Curve.from_nodes(init_nodes)
+
+        # option 1. With uniform speed
+        # f(t)
+        f = curve.to_symbolic()
+            
+        # df/dt
+        gradient = []
+        for i in range(128):
+            s = sympy.Symbol('s')
+            gradient.append(f[i].diff(s))
+        V = []
+            
+        level = len(sympy.Poly(gradient[0]).coeffs())
+            
+        for i in range(level):
+            v = np.zeros(128)
+            for j in range(128):
+                v[j] = sympy.Poly(gradient[j]).coeffs()[i]
+            V.append(v)
+            
+        V = np.array(V)
+
+        num_segments = 1200
+        t_vals = []
+        t = 0
+        interval = num_segments / self.num_sample_nodes
+        for i in range(num_segments):
+            if i % interval == 0:
+                t_vals.append(t)
+                
+            step = 0
+            for j in range(V.shape[0]):
+                step = step + (t**(V.shape[0] - 1 - j)) * V[j]
+            step = np.linalg.norm(step)
+            t = t + (curve.length / num_segments) / step
+            
+        t_vals.append(1.0)
+        t_vals = np.array(t_vals)
+
+       
+        
+
+        samples = curve.evaluate_multi(t_vals)
         samples = samples.transpose()
         
         self.solution = samples
         
 
+    def solve(self, s, t):
+        
+        self.source_idx = s
+        self.target_idx = t
+
+        
+
+        self.timer.start()
+        self.computeInitPath()
+        self.timer.end()
+
+        print ('It cost %f sec to compute initial path.' % self.timer.time)
+
+        self.timer.start()
+        self.optimizePath()
+        self.timer.end()
+
+        print ('It cost %f sec to optimize the path.' % self.timer.time)
+
     # Visualize the optimal path
     def show(self):
+
+        # get PCA embedding and plot them
+        graph_nodes = self.nodes
+        curve_nodes = self.solution
+        z_dim = graph_nodes.shape[1]
+        nodes = np.append(graph_nodes, curve_nodes).reshape(-1, z_dim)
         pca = PCA(n_components = 2)
-        embedded = pca.fit_transform(self.nodes)
+        embedded = pca.fit_transform(nodes)
         xs, ys = embedded.T
-        plt.scatter(xs, ys, c = 'gray')
+        plt.scatter(xs, ys, c = 'gray', alpha = 0.8)
+
+        # plot shortest path obtained by Dijkstra's algorithm
+        #xs_init, ys_init = pca.transform(self.init_path).T
+        #plt.scatter(xs_init, ys_init, c = 'black')
+        #plt.plot(xs_init, ys_init, c = 'black', label = 'Shortest Path')
+
+
+        # plot bezier curve
+        idx = graph_nodes.shape[0]
+        plt.scatter(xs[idx:], ys[idx:], c = 'red')
+        plt.plot(xs[idx:], ys[idx:], c = 'red', label = 'Bezier Curve')
+
+        # show linear interpolation path
+        source = embedded[idx]
+        target = embedded[-1]
+        t_vals = np.linspace(0, 1, 31)
+
+        nodes = []
+        for t in t_vals:
+            nodes.append(source + t * (target - source))
+        nodes = np.array(nodes)
+
+        xs, ys = nodes.T
+
+        plt.scatter(xs, ys, c = 'blue')
+        plt.plot(xs, ys, c = 'blue', label = 'Linear Interpolation')
 
         plt.xlabel('1st principal component')
         plt.ylabel('2nd principal component')
-
-        #n = len(self.seq)
-        path_nodes = self.solution
-        xs, ys = pca.transform(path_nodes).T
-        
-        # draw nodes
-        plt.scatter(xs, ys, c = 'red')
-        # draw edges
-        plt.plot(xs, ys, c = 'red', label = 'initial path')
-        #plt.arrow(nodes_x, nodes_y - nodes_x, c = 'green')
-            
-        # show linear interpolation path
-        plt.plot([xs[0], xs[-1]], [ys[0], ys[-1]], c = 'blue')
-
+        plt.legend(loc='upper right')
         plt.show()
