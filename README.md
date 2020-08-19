@@ -1,2 +1,3 @@
-# RIMD Adversarial Autoencoder
+# Keyframe Animation based on Important Features
+
 
