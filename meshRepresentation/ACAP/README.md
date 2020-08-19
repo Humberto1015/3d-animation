@@ -13,3 +13,8 @@
 ├── mesh.h
 └── npy.hpp
 ```
+
+## run
+```
+./ACAP_bin [path_to_reference_mesh] --animation
+```
