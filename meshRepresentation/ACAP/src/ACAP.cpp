@@ -100,6 +100,7 @@ std::vector<double> ACAP::solveFeature(){
 
     // To do
     // step 1. solve the optimal axis set here
+    /*
     AxisSolver orienSolver;
     orienSolver.solve(axis, this->baseMesh->neighbors);
 
@@ -114,7 +115,7 @@ std::vector<double> ACAP::solveFeature(){
         std::cout << angleSolver.solution[i] << "\n";
         angles[i] = 2 * M_PI * angleSolver.solution[i] + oriens[i] * angles[i];
     }
-
+    */
     int idx = 0;
     // set the quaternion representation of the first 1-ring
     Eigen::AngleAxisd V_0(angles[0], axis[0]);

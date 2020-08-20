@@ -1,6 +1,6 @@
 #include "mesh.h"
-#include "axisSolver.h"
-#include "angleSolver.h"
+//#include "axisSolver.h"
+//#include "angleSolver.h"
 #include <unsupported/Eigen/MatrixFunctions>
 #include <Eigen/Geometry>
 #include <iostream>
