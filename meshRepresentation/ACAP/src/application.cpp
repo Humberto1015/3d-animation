@@ -41,16 +41,14 @@ std::vector<double> App::loadNumpy(const std::string& path){
     return feat;
 }
 
-void App::reconstruct(const std::string& path, const std::string& setBlue){
+void App::reconstruct(const std::string& path){
     
     auto f = loadNumpy(path);
     auto verts = acap->solveRecon(f);
     Mesh recon(verts, this->meshFaces);
 
-    if (setBlue == "1")
-        recon.show(true);
-    else
-        recon.show(false);
+    recon.show();
+
 }
 
 void App::genACAP(const std::string& dir_source, const std::string& dir_target){

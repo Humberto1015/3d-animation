@@ -1,9 +1,10 @@
 import numpy as np
+import os
+import argparse
 
-def preprocess():
-    root = './ACAP-data/SMPL/'
-
-    num_samples = 10000
+def preprocess(root = './ACAP-data/SMPL'):
+    
+    num_samples = len(os.listdir(root))
 
     ''' step 1. Get minima and maxima '''
     minima = None
@@ -50,4 +51,9 @@ def preprocess():
 
 
 if __name__ == '__main__':
-    preprocess()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--path', type = str, default = './ACAP-data/SMPL')
+    opt = parser.parse_args()
+
+    preprocess(opt.path)

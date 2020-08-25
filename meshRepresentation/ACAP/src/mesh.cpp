@@ -8,22 +8,10 @@ Mesh::Mesh(const Eigen::MatrixXd& verts, const Eigen::MatrixXi& faces){
     buildCotWeights();
 }
 
-void Mesh::show(bool setBlue = false){
+void Mesh::show(){
     igl::opengl::glfw::Viewer viewer;
     viewer.data().set_mesh(this->verts, this->faces);
     viewer.core().background_color.setOnes();
-
-    Eigen::MatrixXd C;
-    C.resize(this->verts.rows(), 3);
-    for (int i = 0; i < C.rows(); ++i){
-        C(i, 0) = 102. / 255;
-        C(i, 1) = 179. / 255;
-        C(i, 2) = 255. / 255;
-    }
-
-    if (setBlue)
-        viewer.data().set_colors(C);
-
     viewer.launch();
 }
 

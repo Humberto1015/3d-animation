@@ -16,7 +16,7 @@ public:
 
     // parameters: None
     // this member function renders the mesh using libigl viewer
-    void show(bool);
+    void show();
 private:
 
     // parameters: None

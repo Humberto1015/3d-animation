@@ -28,7 +28,7 @@ public:
 
     // parameters: the path of numpy file which contains ACAP feature
     // this member function renders the recovered mesh
-    void reconstruct(const std::string&, const std::string&);
+    void reconstruct(const std::string&);
 
     // to do: automatically count number of files under given directory
     // parameters:
